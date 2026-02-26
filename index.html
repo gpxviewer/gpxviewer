@@ -248,7 +248,7 @@
         
         <div class="panel-glass" style="flex-grow: 1; justify-content: space-between;">
             <button class="btn-circle" id="step-minus" title="上一步">−</button>
-            <div style="font-size: 12px; color: #666; font-weight: 600;">长按快速连续步进</div>
+            <div style="font-size: 11px; color: #666; font-weight: 600;">长按快速步进</div>
             <button class="btn-circle" id="step-plus" title="下一步">+</button>
         </div>
     </div>
@@ -260,7 +260,7 @@
     let map, trackPoints = [], polylines = [];
     let currentMode = 0; 
     let indicatorMarker;
-    let currentIndex = 0;
+    let currentDistanceValue = 0; // 当前所在轨道的距离位置 (meters)
     
     // 步进设置
     let currentStepValue = 100;
@@ -305,8 +305,8 @@
 
         const slider = document.getElementById('progress-slider');
         slider.addEventListener('input', function(e) {
-            const index = Math.round((e.target.value / 1000) * (trackPoints.length - 1));
-            updateIndicator(index);
+            const dist = (e.target.value / 1000) * totalDistance;
+            updateByDistance(dist);
         });
     };
 
@@ -317,8 +317,8 @@
             e.preventDefault();
             action();
             holdTimer = setTimeout(() => {
-                holdInterval = setInterval(action, 100);
-            }, 500);
+                holdInterval = setInterval(action, 80); // 稍微加快长按频率
+            }, 400);
         };
 
         const stop = () => {
@@ -381,7 +381,7 @@
         renderTrack();
         map.fitBounds(L.latLngBounds(trackPoints.map(p => [p.lat, p.lon])), { padding: [40, 40] });
         
-        updateIndicator(0);
+        updateByDistance(0);
         updateSegmentAvailability();
     }
 
@@ -403,30 +403,70 @@
         renderTrack();
     }
 
-    function moveByDistance(direction) {
+    // 核心改进：基于距离值进行线性插值，解决点间距过大失效的问题
+    function updateByDistance(targetDist) {
         if (trackPoints.length === 0) return;
-        
-        const targetDist = cumulativeDistances[currentIndex] + (direction * currentStepValue);
 
-        // 查找最接近目标距离的点索引
+        // 边界限制
+        targetDist = Math.max(0, Math.min(targetDist, totalDistance));
+        currentDistanceValue = targetDist;
+
+        // 二分查找目标距离所在的区间 [i-1, i]
         let low = 0, high = cumulativeDistances.length - 1;
-        let bestIndex = currentIndex;
-        
-        // 使用二分查找提高长距离寻找速度
+        let i = 1;
         while (low <= high) {
             let mid = Math.floor((low + high) / 2);
-            if (Math.abs(cumulativeDistances[mid] - targetDist) < Math.abs(cumulativeDistances[bestIndex] - targetDist)) {
-                bestIndex = mid;
+            if (cumulativeDistances[mid] < targetDist) {
+                i = mid + 1;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
             }
-            if (cumulativeDistances[mid] < targetDist) low = mid + 1;
-            else if (cumulativeDistances[mid] > targetDist) high = mid - 1;
-            else break;
         }
+        
+        // 索引溢出修正
+        if (i >= trackPoints.length) i = trackPoints.length - 1;
+        if (i < 1) i = 1;
 
-        if (bestIndex !== currentIndex) {
-            updateIndicator(bestIndex);
-            document.getElementById('progress-slider').value = (bestIndex / (trackPoints.length - 1)) * 1000;
-        }
+        const p1 = trackPoints[i - 1];
+        const p2 = trackPoints[i];
+        const d1 = cumulativeDistances[i - 1];
+        const d2 = cumulativeDistances[i];
+
+        // 计算插值比例
+        const segmentDist = d2 - d1;
+        const ratio = segmentDist > 0 ? (targetDist - d1) / segmentDist : 0;
+
+        // 线性插值计算当前位置的属性
+        const currentLat = p1.lat + (p2.lat - p1.lat) * ratio;
+        const currentLon = p1.lon + (p2.lon - p1.lon) * ratio;
+        const currentEle = p1.ele + (p2.ele - p1.ele) * ratio;
+        const currentSpeed = p1.speed + (p2.speed - p1.speed) * ratio;
+
+        // 更新指示器
+        indicatorMarker.setLatLng([currentLat, currentLon]);
+        if (!map.hasLayer(indicatorMarker)) indicatorMarker.addTo(map);
+
+        // 更新进度条和信息面板
+        document.getElementById('progress-slider').value = (targetDist / totalDistance) * 1000;
+        
+        const overlay = document.getElementById('info-overlay');
+        overlay.style.display = 'block';
+        overlay.innerHTML = `
+            <div class="label-sm">总体轨迹</div>
+            <b>距离:</b> ${(totalDistance/1000).toFixed(2)} km | <b>点数:</b> ${trackPoints.length}
+            <hr style="border:0; border-top:1px solid #ddd; margin:8px 0;">
+            <div class="label-sm">当前位置 (平滑插值)</div>
+            <b>速度:</b> ${(currentSpeed * 3.6).toFixed(1)} km/h<br>
+            <b>海拔:</b> ${currentEle.toFixed(1)} m<br>
+            <b>进度:</b> ${targetDist.toFixed(1)}m / ${totalDistance.toFixed(0)}m
+        `;
+    }
+
+    function moveByDistance(direction) {
+        if (trackPoints.length === 0) return;
+        const targetDist = currentDistanceValue + (direction * currentStepValue);
+        updateByDistance(targetDist);
     }
 
     function renderTrack() {
@@ -450,25 +490,6 @@
                 polylines.push(segment);
             }
         }
-    }
-
-    function updateIndicator(index) {
-        currentIndex = index;
-        const pt = trackPoints[index];
-        indicatorMarker.setLatLng([pt.lat, pt.lon]);
-        if (!map.hasLayer(indicatorMarker)) indicatorMarker.addTo(map);
-
-        const overlay = document.getElementById('info-overlay');
-        overlay.style.display = 'block';
-        overlay.innerHTML = `
-            <div class="label-sm">总体信息</div>
-            <b>距离:</b> ${(totalDistance/1000).toFixed(2)} km | <b>点数:</b> ${trackPoints.length}
-            <hr style="border:0; border-top:1px solid #ddd; margin:8px 0;">
-            <div class="label-sm">当前位置 (点 ${index})</div>
-            <b>速度:</b> ${(pt.speed * 3.6).toFixed(1)} km/h<br>
-            <b>海拔:</b> ${pt.ele.toFixed(1)} m<br>
-            <b>进度:</b> ${cumulativeDistances[index].toFixed(0)}m / ${totalDistance.toFixed(0)}m
-        `;
     }
 </script>
 
