@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GPX 轨迹分析工具</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root {
+            --primary-bg: rgba(255, 255, 255, 0.9);
+            --accent-color: #007AFF;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* 顶部导入按钮 */
+        #import-container {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+        }
+
+        .btn-main {
+            background: var(--accent-color);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
+            border: none;
+            font-size: 16px;
+            font-weight: 600;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* 底部悬浮控制面板 */
+        #controls {
+            position: absolute;
+            bottom: 30px;
+            left: 20px;
+            right: 20px;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            pointer-events: none;
+        }
+
+        .control-panel {
+            pointer-events: auto;
+            background: var(--primary-bg);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            padding: 10px 15px;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-grow: 1;
+        }
+
+        #mode-toggle {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            border: none;
+            background: var(--accent-color);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-shrink: 0;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            pointer-events: auto;
+        }
+
+        #mode-toggle svg {
+            width: 24px;
+            height: 24px;
+        }
+
+        #progress-container {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        #progress-slider {
+            width: 100%;
+            height: 30px;
+            -webkit-appearance: none;
+            background: transparent;
+            outline: none;
+        }
+
+        #progress-slider::-webkit-slider-runnable-track {
+            height: 6px;
+            background: #ddd;
+            border-radius: 3px;
+        }
+
+        #progress-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 24px;
+            width: 24px;
+            border-radius: 50%;
+            background: var(--accent-color);
+            border: 3px solid white;
+            margin-top: -9px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }
+
+        .label-text {
+            font-size: 12px;
+            color: #333;
+            font-weight: 500;
+        }
+
+        /* 隐藏原生文件输入 */
+        #file-input {
+            display: none;
+        }
+
+        /* 信息浮窗 */
+        #info-overlay {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: var(--primary-bg);
+            padding: 10px;
+            border-radius: 12px;
+            font-size: 13px;
+            z-index: 1000;
+            display: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="import-container">
+    <button class="btn-main" onclick="document.getElementById('file-input').click()">导入 GPX 文件</button>
+    <input type="file" id="file-input" accept=".gpx">
+</div>
+
+<div id="info-overlay"></div>
+
+<div id="controls">
+    <button id="mode-toggle" title="切换模式">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+        </svg>
+    </button>
+    <div class="control-panel">
+        <div id="progress-container">
+            <span class="label-text" id="mode-label">模式: 纯色蓝色</span>
+            <input type="range" id="progress-slider" min="0" max="100" value="0" disabled>
+        </div>
+    </div>
+</div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    let map, trackPoints = [], polylines = [];
+    let currentMode = 0; // 0: 蓝色, 1: 速度渐变, 2: 海拔渐变
+    let indicatorMarker;
+
+    // 初始化地图
+    window.onload = function() {
+        map = L.map('map', {
+            zoomControl: false,
+            attributionControl: false
+        }).setView([39.9, 116.4], 13);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        // 初始化指示器（拖动进度条时显示）
+        const icon = L.divIcon({
+            className: 'custom-div-icon',
+            html: `<div style="background-color: white; border: 3px solid #007AFF; width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 10px rgba(0,0,0,0.3);"></div>`,
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+        });
+        indicatorMarker = L.marker([0, 0], { icon: icon });
+
+        // 文件读取事件
+        document.getElementById('file-input').addEventListener('change', handleFileSelect);
+
+        // 模式切换事件
+        document.getElementById('mode-toggle').addEventListener('click', toggleMode);
+
+        // 进度条拖动事件
+        const slider = document.getElementById('progress-slider');
+        slider.addEventListener('input', function(e) {
+            updateIndicator(e.target.value);
+        });
+    };
+
+    function handleFileSelect(evt) {
+        const file = evt.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            parseGPX(e.target.result);
+        };
+        reader.readAsText(file);
+    }
+
+    function parseGPX(xmlText) {
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlText, "text/xml");
+        const trkpts = xmlDoc.getElementsByTagName("trkpt");
+        
+        trackPoints = [];
+        for (let i = 0; i < trkpts.length; i++) {
+            const pt = trkpts[i];
+            const lat = parseFloat(pt.getAttribute("lat"));
+            const lon = parseFloat(pt.getAttribute("lon"));
+            const ele = pt.getElementsByTagName("ele")[0] ? parseFloat(pt.getElementsByTagName("ele")[0].textContent) : 0;
+            const timeStr = pt.getElementsByTagName("time")[0] ? pt.getElementsByTagName("time")[0].textContent : null;
+            const time = timeStr ? new Date(timeStr).getTime() : 0;
+
+            trackPoints.push({ lat, lon, ele, time });
+        }
+
+        if (trackPoints.length < 2) {
+            alert("该GPX文件轨迹点不足。");
+            return;
+        }
+
+        // 计算速度 (m/s)
+        for (let i = 0; i < trackPoints.length; i++) {
+            if (i === 0) {
+                trackPoints[i].speed = 0;
+            } else {
+                const dist = map.distance(
+                    [trackPoints[i-1].lat, trackPoints[i-1].lon],
+                    [trackPoints[i].lat, trackPoints[i].lon]
+                );
+                const timeDiff = (trackPoints[i].time - trackPoints[i-1].time) / 1000;
+                trackPoints[i].speed = timeDiff > 0 ? dist / timeDiff : 0;
+            }
+        }
+
+        document.getElementById('progress-slider').disabled = false;
+        renderTrack();
+        
+        // 自动缩放到轨迹范围
+        const bounds = L.latLngBounds(trackPoints.map(p => [p.lat, p.lon]));
+        map.fitBounds(bounds, { padding: [50, 50] });
+
+        // 显示信息
+        const totalDist = calculateTotalDistance();
+        document.getElementById('info-overlay').style.display = 'block';
+        document.getElementById('info-overlay').innerHTML = `距离: ${(totalDist/1000).toFixed(2)} km<br>点数: ${trackPoints.length}`;
+    }
+
+    function calculateTotalDistance() {
+        let dist = 0;
+        for (let i = 1; i < trackPoints.length; i++) {
+            dist += map.distance([trackPoints[i-1].lat, trackPoints[i-1].lon], [trackPoints[i].lat, trackPoints[i].lon]);
+        }
+        return dist;
+    }
+
+    function toggleMode() {
+        currentMode = (currentMode + 1) % 3;
+        const labels = ["模式: 纯色蓝色", "模式: 速度渐变 (红→绿)", "模式: 海拔渐变 (绿→红)"];
+        document.getElementById('mode-label').innerText = labels[currentMode];
+        renderTrack();
+    }
+
+    function getColor(value, min, max, isSpeed) {
+        // 标准化 0-1
+        let ratio = (value - min) / (max - min || 1);
+        if (ratio > 1) ratio = 1;
+        if (ratio < 0) ratio = 0;
+
+        // 模式1 速度: 越快(1)越绿(120), 越慢(0)越红(0)
+        // 模式2 海拔: 越高(1)越红(0), 越低(0)越绿(120)
+        let hue;
+        if (isSpeed) {
+            hue = ratio * 120; // 0 (红) to 120 (绿)
+        } else {
+            hue = (1 - ratio) * 120; // 120 (绿) to 0 (红)
+        }
+        return `hsl(${hue}, 100%, 45%)`;
+    }
+
+    function renderTrack() {
+        // 清除旧轨迹
+        polylines.forEach(p => map.removeLayer(p));
+        polylines = [];
+
+        if (currentMode === 0) {
+            // 纯色蓝色
+            const latlngs = trackPoints.map(p => [p.lat, p.lon]);
+            const poly = L.polyline(latlngs, { color: '#007AFF', weight: 5, opacity: 0.8 }).addTo(map);
+            polylines.push(poly);
+        } else {
+            // 渐变色：需要分段绘制
+            const values = currentMode === 1 ? trackPoints.map(p => p.speed) : trackPoints.map(p => p.ele);
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+
+            for (let i = 1; i < trackPoints.length; i++) {
+                const color = getColor(values[i], min, max, currentMode === 1);
+                const segment = L.polyline([
+                    [trackPoints[i-1].lat, trackPoints[i-1].lon],
+                    [trackPoints[i].lat, trackPoints[i].lon]
+                ], { color: color, weight: 6, opacity: 0.9 }).addTo(map);
+                polylines.push(segment);
+            }
+        }
+    }
+
+    function updateIndicator(percent) {
+        if (trackPoints.length === 0) return;
+        const index = Math.floor((percent / 100) * (trackPoints.length - 1));
+        const point = trackPoints[index];
+        
+        indicatorMarker.setLatLng([point.lat, point.lon]);
+        if (!map.hasLayer(indicatorMarker)) {
+            indicatorMarker.addTo(map);
+        }
+
+        // 同时更新信息浮窗展示当前点的详情
+        const info = `
+            ${document.getElementById('info-overlay').innerHTML.split('<hr>')[0]}
+            <hr>
+            当前点速度: ${(point.speed * 3.6).toFixed(1)} km/h<br>
+            当前海拔: ${point.ele.toFixed(1)} m
+        `;
+        document.getElementById('info-overlay').innerHTML = info;
+    }
+</script>
+
+</body>
+</html>
