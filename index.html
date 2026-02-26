@@ -82,11 +82,11 @@
             align-items: center;
         }
 
-        /* 模式切换按钮 */
-        #mode-toggle {
-            width: 50px;
-            height: 50px;
-            border-radius: 25px;
+        /* 辅助按钮样式 (模式切换/复位) */
+        .btn-side {
+            width: 44px;
+            height: 44px;
+            border-radius: 22px;
             border: none;
             background: var(--accent-color);
             color: white;
@@ -102,41 +102,43 @@
         /* 分段选择器样式 */
         .segmented-control {
             display: flex;
-            background: #e5e5ea;
+            background: rgba(0,0,0,0.05);
             padding: 2px;
-            border-radius: 10px;
+            border-radius: 12px;
             flex-grow: 1;
-            margin: 0 4px;
+            margin: 0 8px;
         }
 
         .segment-btn {
             flex: 1;
             border: none;
             background: transparent;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 600;
             padding: 8px 0;
-            border-radius: 8px;
-            color: #333;
+            border-radius: 10px;
+            color: #666;
             cursor: pointer;
             -webkit-tap-highlight-color: transparent;
             transition: all 0.2s;
+            white-space: nowrap;
         }
 
         .segment-btn.active {
             background: white;
+            color: var(--accent-color);
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
         /* 加减按钮 */
         .btn-circle {
-            width: 44px;
-            height: 44px;
-            border-radius: 22px;
+            width: 40px;
+            height: 40px;
+            border-radius: 20px;
             border: none;
             background: #f0f0f0;
             color: var(--accent-color);
-            font-size: 24px;
+            font-size: 20px;
             font-weight: bold;
             display: flex;
             justify-content: center;
@@ -144,6 +146,7 @@
             cursor: pointer;
             -webkit-tap-highlight-color: transparent;
             user-select: none;
+            flex-shrink: 0;
         }
 
         .btn-circle:active {
@@ -225,31 +228,36 @@
         </div>
     </div>
 
-    <!-- 步进分段选择器行 -->
+    <!-- 底部按钮组合行 -->
     <div class="controls-row">
-        <div class="panel-glass" style="flex-grow: 1; justify-content: space-around;">
-            <div class="segmented-control" id="step-segments">
-                <button class="segment-btn" data-val="1">1m</button>
-                <button class="segment-btn" data-val="10">10m</button>
-                <button class="segment-btn active" data-val="100">100m</button>
-                <button class="segment-btn" data-val="1000">1km</button>
-                <button class="segment-btn" data-val="10000">10km</button>
-            </div>
-        </div>
-    </div>
+        <!-- 地图复位按钮 -->
+        <button id="reset-view" class="btn-side" title="复位地图">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                <path d="M3 3v5h5"></path>
+            </svg>
+        </button>
 
-    <!-- 底部按钮行 -->
-    <div class="controls-row">
-        <button id="mode-toggle" title="切换显示模式">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:24px;height:24px;">
+        <!-- 模式切换按钮 -->
+        <button id="mode-toggle" class="btn-side" title="切换渲染模式">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;">
                 <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
             </svg>
         </button>
         
-        <div class="panel-glass" style="flex-grow: 1; justify-content: space-between;">
-            <button class="btn-circle" id="step-minus" title="上一步">−</button>
-            <div style="font-size: 11px; color: #666; font-weight: 600;">长按快速步进</div>
-            <button class="btn-circle" id="step-plus" title="下一步">+</button>
+        <!-- 主操作面板 -->
+        <div class="panel-glass" style="flex-grow: 1; padding: 6px 10px;">
+            <button class="btn-circle" id="step-minus">−</button>
+            
+            <div class="segmented-control" id="step-segments">
+                <button class="segment-btn" data-val="1">1m</button>
+                <button class="segment-btn" data-val="10">10m</button>
+                <button class="segment-btn active" data-val="100">100m</button>
+                <button class="segment-btn" data-val="1000">1k</button>
+                <button class="segment-btn" data-val="10000">10k</button>
+            </div>
+
+            <button class="btn-circle" id="step-plus">+</button>
         </div>
     </div>
 </div>
@@ -289,6 +297,7 @@
 
         document.getElementById('file-input').addEventListener('change', handleFileSelect);
         document.getElementById('mode-toggle').addEventListener('click', toggleMode);
+        document.getElementById('reset-view').addEventListener('click', resetMapView);
         
         // 分段选择器事件
         document.querySelectorAll('.segment-btn').forEach(btn => {
@@ -317,7 +326,7 @@
             e.preventDefault();
             action();
             holdTimer = setTimeout(() => {
-                holdInterval = setInterval(action, 80); // 稍微加快长按频率
+                holdInterval = setInterval(action, 80);
             }, 400);
         };
 
@@ -379,10 +388,20 @@
 
         document.getElementById('progress-slider').disabled = false;
         renderTrack();
-        map.fitBounds(L.latLngBounds(trackPoints.map(p => [p.lat, p.lon])), { padding: [40, 40] });
+        resetMapView();
         
         updateByDistance(0);
         updateSegmentAvailability();
+    }
+
+    function resetMapView() {
+        if (trackPoints.length === 0) return;
+        const bounds = L.latLngBounds(trackPoints.map(p => [p.lat, p.lon]));
+        map.fitBounds(bounds, { 
+            padding: [50, 50], 
+            animate: true,
+            duration: 0.8
+        });
     }
 
     function updateSegmentAvailability() {
@@ -403,15 +422,12 @@
         renderTrack();
     }
 
-    // 核心改进：基于距离值进行线性插值，解决点间距过大失效的问题
     function updateByDistance(targetDist) {
         if (trackPoints.length === 0) return;
 
-        // 边界限制
         targetDist = Math.max(0, Math.min(targetDist, totalDistance));
         currentDistanceValue = targetDist;
 
-        // 二分查找目标距离所在的区间 [i-1, i]
         let low = 0, high = cumulativeDistances.length - 1;
         let i = 1;
         while (low <= high) {
@@ -424,7 +440,6 @@
             }
         }
         
-        // 索引溢出修正
         if (i >= trackPoints.length) i = trackPoints.length - 1;
         if (i < 1) i = 1;
 
@@ -433,21 +448,17 @@
         const d1 = cumulativeDistances[i - 1];
         const d2 = cumulativeDistances[i];
 
-        // 计算插值比例
         const segmentDist = d2 - d1;
         const ratio = segmentDist > 0 ? (targetDist - d1) / segmentDist : 0;
 
-        // 线性插值计算当前位置的属性
         const currentLat = p1.lat + (p2.lat - p1.lat) * ratio;
         const currentLon = p1.lon + (p2.lon - p1.lon) * ratio;
         const currentEle = p1.ele + (p2.ele - p1.ele) * ratio;
         const currentSpeed = p1.speed + (p2.speed - p1.speed) * ratio;
 
-        // 更新指示器
         indicatorMarker.setLatLng([currentLat, currentLon]);
         if (!map.hasLayer(indicatorMarker)) indicatorMarker.addTo(map);
 
-        // 更新进度条和信息面板
         document.getElementById('progress-slider').value = (targetDist / totalDistance) * 1000;
         
         const overlay = document.getElementById('info-overlay');
