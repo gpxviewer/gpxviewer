@@ -8,9 +8,10 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root {
-            --primary-bg: rgba(255, 255, 255, 0.7); /* 降低透明度 */
+            --primary-bg: rgba(255, 255, 255, 0.7);
             --accent-color: #007AFF;
             --danger-color: #FF3B30;
+            --panel-width: 280px;
         }
 
         body, html {
@@ -27,6 +28,7 @@
             width: 100%;
             height: 100%;
             z-index: 1;
+            transition: margin-right 0.3s ease;
         }
 
         /* 顶部导入按钮 */
@@ -51,6 +53,113 @@
             -webkit-tap-highlight-color: transparent;
         }
 
+        /* 侧边列表面板 */
+        #file-panel {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: var(--panel-width);
+            height: 100%;
+            background: var(--primary-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            z-index: 1100;
+            box-shadow: -2px 0 10px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            transform: translateX(100%); /* 默认关闭 (移动端) */
+        }
+
+        /* 桌面端默认展开 */
+        @media (min-width: 768px) {
+            #file-panel {
+                transform: translateX(0);
+            }
+            #map {
+                width: calc(100% - var(--panel-width));
+            }
+            #import-container {
+                left: calc(50% - (var(--panel-width) / 2));
+            }
+            #menu-toggle { display: none; } /* 桌面端隐藏切换按钮 */
+        }
+
+        #file-panel.open {
+            transform: translateX(0);
+        }
+
+        .panel-header {
+            padding: 20px;
+            font-weight: bold;
+            font-size: 18px;
+            border-bottom: 1px solid rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #file-list {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .file-item {
+            padding: 12px 15px;
+            margin-bottom: 8px;
+            background: rgba(255,255,255,0.5);
+            border-radius: 12px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+        }
+
+        .file-item:hover { background: white; }
+        .file-item.active {
+            background: white;
+            border-color: var(--accent-color);
+            box-shadow: 0 2px 8px rgba(0,122,255,0.15);
+        }
+
+        .file-info {
+            overflow: hidden;
+            flex-grow: 1;
+        }
+
+        .file-name {
+            font-size: 14px;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .file-meta {
+            font-size: 11px;
+            color: #888;
+            margin-top: 2px;
+        }
+
+        .btn-delete {
+            color: #ccc;
+            padding: 5px;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .btn-delete:hover { color: var(--danger-color); }
+
+        /* 菜单切换按钮 (移动端) */
+        #menu-toggle {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 1050;
+        }
+
         /* 底部控制面板 */
         #controls-wrapper {
             position: absolute;
@@ -62,6 +171,13 @@
             flex-direction: column;
             gap: 12px;
             pointer-events: none;
+            transition: right 0.3s ease;
+        }
+        
+        @media (min-width: 768px) {
+            #controls-wrapper {
+                right: calc(var(--panel-width) + 10px);
+            }
         }
 
         .controls-row {
@@ -82,7 +198,6 @@
             align-items: center;
         }
 
-        /* 辅助按钮样式 */
         .btn-side {
             width: 44px;
             height: 44px;
@@ -118,7 +233,6 @@
             border-radius: 10px;
             color: #666;
             cursor: pointer;
-            -webkit-tap-highlight-color: transparent;
             transition: all 0.2s;
             white-space: nowrap;
         }
@@ -142,13 +256,7 @@
             justify-content: center;
             align-items: center;
             cursor: pointer;
-            -webkit-tap-highlight-color: transparent;
             user-select: none;
-            flex-shrink: 0;
-        }
-
-        #progress-slider-container {
-            width: 100%;
         }
 
         #progress-slider {
@@ -175,11 +283,10 @@
             box-shadow: 0 2px 6px rgba(0,0,0,0.3);
         }
 
-        /* 信息提示面板 */
         #info-overlay {
             position: absolute;
             top: 20px;
-            right: 15px;
+            left: 20px; /* 改为左侧，避免挡住右侧面板 */
             background: var(--primary-bg);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
@@ -202,7 +309,6 @@
             margin-bottom: 2px;
         }
 
-        /* Toast 样式 */
         #toast {
             position: fixed;
             top: 50%;
@@ -218,32 +324,9 @@
             pointer-events: none;
         }
 
-        /* 漫画气泡样式标记 */
-        .comic-marker {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-        }
-        .comic-bubble {
-            background: white;
-            border: 2px solid #333;
-            border-radius: 12px;
-            padding: 2px 6px;
-            font-size: 10px;
-            font-weight: bold;
-            white-space: nowrap;
-            box-shadow: 2px 2px 0px rgba(0,0,0,0.2);
-            position: relative;
-        }
-        .comic-arrow {
-            width: 0;
-            height: 0;
-            border-left: 5px solid transparent;
-            border-right: 5px solid transparent;
-            border-top: 6px solid #333;
-            margin-top: -1px;
-        }
+        .comic-marker { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .comic-bubble { background: white; border: 2px solid #333; border-radius: 12px; padding: 2px 6px; font-size: 10px; font-weight: bold; white-space: nowrap; box-shadow: 2px 2px 0px rgba(0,0,0,0.2); position: relative; }
+        .comic-arrow { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #333; margin-top: -1px; }
         .marker-max-speed .comic-bubble { color: #FF9500; border-color: #FF9500; }
         .marker-max-speed .comic-arrow { border-top-color: #FF9500; }
         .marker-max-ele .comic-bubble { color: #FF3B30; border-color: #FF3B30; }
@@ -251,15 +334,50 @@
         .marker-min-ele .comic-bubble { color: #34C759; border-color: #34C759; }
         .marker-min-ele .comic-arrow { border-top-color: #34C759; }
 
+        /* 移动端遮罩 */
+        #panel-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.3);
+            z-index: 1090;
+            display: none;
+        }
     </style>
 </head>
 <body>
 
 <div id="map"></div>
 
+<!-- 移动端遮罩 -->
+<div id="panel-overlay"></div>
+
+<!-- 顶部按钮 -->
 <div id="import-container">
     <button class="btn-main" onclick="document.getElementById('file-input').click()">导入 GPX 轨迹</button>
-    <input type="file" id="file-input" accept=".gpx">
+    <input type="file" id="file-input" accept=".gpx" multiple style="display: none;">
+</div>
+
+<!-- 移动端菜单切换按钮 -->
+<button id="menu-toggle" class="btn-side">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;">
+        <line x1="3" y1="12" x2="21" y2="12"></line>
+        <line x1="3" y1="6" x2="21" y2="6"></line>
+        <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+</button>
+
+<!-- 侧边面板 -->
+<div id="file-panel">
+    <div class="panel-header">
+        <span>轨迹列表</span>
+        <span id="close-panel" style="font-size: 24px; cursor: pointer; display: none;">×</span>
+    </div>
+    <div id="file-list">
+        <!-- 动态生成文件项 -->
+        <div style="text-align: center; padding: 40px 20px; color: #999; font-size: 13px;">
+            请导入 GPX 文件
+        </div>
+    </div>
 </div>
 
 <div id="info-overlay"></div>
@@ -268,16 +386,14 @@
 <div id="controls-wrapper">
     <div class="controls-row">
         <div class="panel-glass" style="flex-grow: 1;">
-            <div id="progress-slider-container">
-                <input type="range" id="progress-slider" min="0" max="1000" value="0" disabled>
-            </div>
+            <input type="range" id="progress-slider" min="0" max="1000" value="0" disabled>
         </div>
     </div>
 
     <div class="controls-row">
         <div class="panel-glass" style="flex-grow: 1; padding: 6px 10px;">
             <button class="btn-circle" id="step-minus">−</button>
-            <div class="segmented-control" id="step-segments">
+            <div class="segmented-control">
                 <button class="segment-btn" data-val="1">1m</button>
                 <button class="segment-btn" data-val="10">10m</button>
                 <button class="segment-btn active" data-val="100">100m</button>
@@ -305,29 +421,20 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    let map, trackPoints = [], polylines = [], statsMarkers = [];
+    let map;
+    let loadedFiles = []; // { id, name, data, stats, points, cumulativeDistances, totalDistance }
+    let activeFileIndex = -1;
+    
+    let polylines = [], statsMarkers = [];
     let currentMode = 0; 
     let indicatorMarker;
     let currentDistanceValue = 0;
-    
-    let stats = {
-        maxEle: -Infinity, maxEleIdx: -1,
-        minEle: Infinity, minEleIdx: -1,
-        maxSpeed: 0, maxSpeedIdx: -1
-    };
-
     let currentStepValue = 100;
-    let totalDistance = 0;
-    let cumulativeDistances = []; 
 
     let holdTimer = null, holdInterval = null;
 
     window.onload = function() {
-        map = L.map('map', {
-            zoomControl: false,
-            attributionControl: false
-        }).setView([34, 108], 5);
-
+        map = L.map('map', { zoomControl: false, attributionControl: false }).setView([34, 108], 5);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
         const icon = L.divIcon({
@@ -338,13 +445,16 @@
         });
         indicatorMarker = L.marker([0, 0], { icon: icon, zIndexOffset: 1000 });
 
+        // 事件监听
         document.getElementById('file-input').addEventListener('change', handleFileSelect);
         document.getElementById('mode-toggle').addEventListener('click', toggleMode);
         document.getElementById('reset-view').addEventListener('click', resetMapView);
+        document.getElementById('menu-toggle').addEventListener('click', () => togglePanel(true));
+        document.getElementById('close-panel').addEventListener('click', () => togglePanel(false));
+        document.getElementById('panel-overlay').addEventListener('click', () => togglePanel(false));
         
-        // 地图点击事件：查找最近点
-        map.on('click', function(e) {
-            if (trackPoints.length === 0) return;
+        map.on('click', (e) => {
+            if (activeFileIndex === -1) return;
             findNearestTrackPoint(e.latlng);
         });
 
@@ -360,77 +470,73 @@
         setupHoldableButton('step-minus', () => moveByDistance(-1));
 
         const slider = document.getElementById('progress-slider');
-        slider.addEventListener('input', function(e) {
-            const dist = (e.target.value / 1000) * totalDistance;
+        slider.addEventListener('input', (e) => {
+            if (activeFileIndex === -1) return;
+            const dist = (e.target.value / 1000) * loadedFiles[activeFileIndex].totalDistance;
             updateByDistance(dist);
+        });
+
+        // 响应式检测
+        window.addEventListener('resize', () => {
+            const isMobile = window.innerWidth < 768;
+            document.getElementById('close-panel').style.display = isMobile ? 'block' : 'none';
+            if (!isMobile) togglePanel(false, true); 
         });
     };
 
-    function findNearestTrackPoint(clickedLatLng) {
-        let minSqDist = Infinity;
-        let nearestIdx = 0;
+    function togglePanel(show, forceMobileOff = false) {
+        const panel = document.getElementById('file-panel');
+        const overlay = document.getElementById('panel-overlay');
+        if (show) {
+            panel.classList.add('open');
+            overlay.style.display = 'block';
+        } else {
+            panel.classList.remove('open');
+            overlay.style.display = 'none';
+        }
+    }
 
-        for (let i = 0; i < trackPoints.length; i++) {
-            const p = trackPoints[i];
-            const dy = clickedLatLng.lat - p.lat;
-            const dx = clickedLatLng.lng - p.lon;
-            const sqDist = dx * dx + dy * dy;
-            if (sqDist < minSqDist) {
-                minSqDist = sqDist;
-                nearestIdx = i;
+    async function handleFileSelect(evt) {
+        const files = Array.from(evt.target.files);
+        if (files.length === 0) return;
+
+        showToast(`正在解析 ${files.length} 个文件...`);
+        
+        for (const file of files) {
+            try {
+                const text = await file.text();
+                const trackData = parseGPXData(text, file.name);
+                if (trackData) {
+                    loadedFiles.push(trackData);
+                }
+            } catch (err) {
+                console.error("解析失败", err);
             }
         }
 
-        const targetDist = cumulativeDistances[nearestIdx];
-        updateByDistance(targetDist);
+        renderFileList();
+        if (activeFileIndex === -1 && loadedFiles.length > 0) {
+            switchToFile(0);
+        }
+        evt.target.value = ''; // 清空以允许重复导入
     }
 
-    function showToast(msg) {
-        const toast = document.getElementById('toast');
-        toast.textContent = msg;
-        toast.style.display = 'block';
-        clearTimeout(window.toastTimer);
-        window.toastTimer = setTimeout(() => { toast.style.display = 'none'; }, 1500);
-    }
-
-    function setupHoldableButton(id, action) {
-        const btn = document.getElementById(id);
-        const start = (e) => {
-            e.preventDefault();
-            action();
-            holdTimer = setTimeout(() => { holdInterval = setInterval(action, 80); }, 400);
-        };
-        const stop = () => { clearTimeout(holdTimer); clearInterval(holdInterval); };
-        btn.addEventListener('mousedown', start);
-        btn.addEventListener('mouseup', stop);
-        btn.addEventListener('mouseleave', stop);
-        btn.addEventListener('touchstart', start);
-        btn.addEventListener('touchend', stop);
-    }
-
-    function handleFileSelect(evt) {
-        const file = evt.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (e) => parseGPX(e.target.result);
-        reader.readAsText(file);
-    }
-
-    function parseGPX(xmlText) {
+    function parseGPXData(xmlText, fileName) {
         const parser = new DOMParser();
         const xmlDoc = parser.parseFromString(xmlText, "text/xml");
         const trkpts = xmlDoc.getElementsByTagName("trkpt");
-        
-        trackPoints = [];
-        cumulativeDistances = [0];
-        totalDistance = 0;
-        stats = { 
+        if (trkpts.length < 2) return null;
+
+        const points = [];
+        const cumulativeDistances = [0];
+        let totalDist = 0;
+        let stats = { 
             maxEle: -Infinity, maxEleIdx: -1, 
             minEle: Infinity, minEleIdx: -1, 
             maxSpeed: 0, maxSpeedIdx: -1 
         };
 
-        const rawPoints = [];
+        const raw = [];
         for (let i = 0; i < trkpts.length; i++) {
             const pt = trkpts[i];
             const lat = parseFloat(pt.getAttribute("lat"));
@@ -438,78 +544,153 @@
             const ele = pt.getElementsByTagName("ele")[0] ? parseFloat(pt.getElementsByTagName("ele")[0].textContent) : 0;
             const timeStr = pt.getElementsByTagName("time")[0] ? pt.getElementsByTagName("time")[0].textContent : null;
             const time = timeStr ? new Date(timeStr).getTime() : 0;
-            rawPoints.push({ lat, lon, ele, time });
+            raw.push({ lat, lon, ele, time });
         }
 
-        // 速度过滤阈值 (160km/h)，可根据运动类型调整
-        const MAX_REASONABLE_SPEED = 160 / 3.6; 
+        const MAX_SPEED_LIMIT = 160 / 3.6; 
 
-        for (let i = 0; i < rawPoints.length; i++) {
-            const currentPt = rawPoints[i];
-            
-            if (currentPt.ele > stats.maxEle) { stats.maxEle = currentPt.ele; stats.maxEleIdx = i; }
-            if (currentPt.ele < stats.minEle) { stats.minEle = currentPt.ele; stats.minEleIdx = i; }
+        for (let i = 0; i < raw.length; i++) {
+            const cur = raw[i];
+            if (cur.ele > stats.maxEle) { stats.maxEle = cur.ele; stats.maxEleIdx = i; }
+            if (cur.ele < stats.minEle) { stats.minEle = cur.ele; stats.minEleIdx = i; }
 
             if (i > 0) {
-                const d = map.distance([rawPoints[i-1].lat, rawPoints[i-1].lon], [currentPt.lat, currentPt.lon]);
-                totalDistance += d;
-                cumulativeDistances.push(totalDistance);
+                const d = map.distance([raw[i-1].lat, raw[i-1].lon], [cur.lat, cur.lon]);
+                totalDist += d;
+                cumulativeDistances.push(totalDist);
                 
-                const timeDiff = (currentPt.time - rawPoints[i-1].time) / 1000;
-                let instantSpeed = timeDiff > 0.1 ? d / timeDiff : 0; // 过滤时间差过小的异常
+                const dt = (cur.time - raw[i-1].time) / 1000;
+                let s = dt > 0.1 ? d / dt : 0;
                 
-                // 窗口平滑计算 (简单滑动平均，取前后点)
-                let smoothedSpeed = instantSpeed;
-                if (i > 1 && i < rawPoints.length - 1) {
-                    const dNext = map.distance([currentPt.lat, currentPt.lon], [rawPoints[i+1].lat, rawPoints[i+1].lon]);
-                    const tNext = (rawPoints[i+1].time - currentPt.time) / 1000;
-                    const speedNext = tNext > 0.1 ? dNext / tNext : instantSpeed;
-                    smoothedSpeed = (instantSpeed + speedNext) / 2;
+                // 平滑
+                if (i > 1 && i < raw.length - 1) {
+                    const dNext = map.distance([cur.lat, cur.lon], [raw[i+1].lat, raw[i+1].lon]);
+                    const tNext = (raw[i+1].time - cur.time) / 1000;
+                    const sNext = tNext > 0.1 ? dNext / tNext : s;
+                    s = (s + sNext) / 2;
                 }
-
-                currentPt.speed = smoothedSpeed;
-
-                // 记录最高速（增加合理性过滤）
-                if (currentPt.speed > stats.maxSpeed && currentPt.speed < MAX_REASONABLE_SPEED) { 
-                    stats.maxSpeed = currentPt.speed; 
+                cur.speed = s;
+                if (s > stats.maxSpeed && s < MAX_SPEED_LIMIT) { 
+                    stats.maxSpeed = s; 
                     stats.maxSpeedIdx = i; 
                 }
-            } else {
-                currentPt.speed = 0;
-            }
-            trackPoints.push(currentPt);
+            } else { cur.speed = 0; }
+            points.push(cur);
         }
 
-        if (trackPoints.length < 2) return alert("轨迹点不足");
+        return {
+            id: Date.now() + Math.random(),
+            name: fileName,
+            points: points,
+            cumulativeDistances: cumulativeDistances,
+            totalDistance: totalDist,
+            stats: stats
+        };
+    }
 
+    function renderFileList() {
+        const list = document.getElementById('file-list');
+        if (loadedFiles.length === 0) {
+            list.innerHTML = `<div style="text-align: center; padding: 40px 20px; color: #999; font-size: 13px;">请导入 GPX 文件</div>`;
+            return;
+        }
+
+        list.innerHTML = '';
+        loadedFiles.forEach((file, index) => {
+            const item = document.createElement('div');
+            item.className = `file-item ${index === activeFileIndex ? 'active' : ''}`;
+            item.onclick = () => switchToFile(index);
+            
+            item.innerHTML = `
+                <div class="file-info">
+                    <div class="file-name">${file.name}</div>
+                    <div class="file-meta">${(file.totalDistance/1000).toFixed(2)} km | ${file.points.length} 点</div>
+                </div>
+                <div class="btn-delete" onclick="removeFile(event, ${index})">×</div>
+            `;
+            list.appendChild(item);
+        });
+    }
+
+    function switchToFile(index) {
+        if (index < 0 || index >= loadedFiles.length) return;
+        activeFileIndex = index;
+        
+        const file = loadedFiles[activeFileIndex];
         document.getElementById('progress-slider').disabled = false;
+        
         renderTrack();
         addStatsMarkers();
         resetMapView();
         updateByDistance(0);
-        updateSegmentAvailability();
+        renderFileList();
+
+        if (window.innerWidth < 768) togglePanel(false);
+    }
+
+    function removeFile(event, index) {
+        event.stopPropagation();
+        loadedFiles.splice(index, 1);
+        if (activeFileIndex === index) {
+            activeFileIndex = loadedFiles.length > 0 ? 0 : -1;
+            if (activeFileIndex === -1) clearMap();
+            else switchToFile(0);
+        } else if (activeFileIndex > index) {
+            activeFileIndex--;
+        }
+        renderFileList();
+    }
+
+    function clearMap() {
+        polylines.forEach(p => map.removeLayer(p));
+        statsMarkers.forEach(m => map.removeLayer(m));
+        if (map.hasLayer(indicatorMarker)) map.removeLayer(indicatorMarker);
+        document.getElementById('info-overlay').style.display = 'none';
+        document.getElementById('progress-slider').disabled = true;
+    }
+
+    function renderTrack() {
+        polylines.forEach(p => map.removeLayer(p));
+        polylines = [];
+        if (activeFileIndex === -1) return;
+
+        const file = loadedFiles[activeFileIndex];
+        const pts = file.points;
+
+        if (currentMode === 0) {
+            const poly = L.polyline(pts.map(p => [p.lat, p.lon]), { color: '#007AFF', weight: 5, opacity: 0.6 }).addTo(map);
+            polylines.push(poly);
+        } else {
+            const values = currentMode === 1 ? pts.map(p => Math.min(p.speed, 160/3.6)) : pts.map(p => p.ele);
+            const min = Math.min(...values), max = Math.max(...values);
+            for (let i = 1; i < pts.length; i++) {
+                const ratio = (values[i] - min) / (max - min || 1);
+                const hue = currentMode === 1 ? ratio * 120 : (1 - ratio) * 120;
+                const segment = L.polyline([[pts[i-1].lat, pts[i-1].lon], [pts[i].lat, pts[i].lon]], { 
+                    color: `hsl(${hue}, 100%, 45%)`, weight: 6, opacity: 0.85 
+                }).addTo(map);
+                polylines.push(segment);
+            }
+        }
     }
 
     function addStatsMarkers() {
         statsMarkers.forEach(m => map.removeLayer(m));
         statsMarkers = [];
+        if (activeFileIndex === -1) return;
+
+        const file = loadedFiles[activeFileIndex];
+        const { stats, points } = file;
 
         const createMarker = (idx, label, value, unit, className) => {
             if (idx === -1) return;
-            const p = trackPoints[idx];
+            const p = points[idx];
             const icon = L.divIcon({
                 className: '',
-                html: `
-                    <div class="comic-marker ${className}">
-                        <div class="comic-bubble">${label}: ${value}${unit}</div>
-                        <div class="comic-arrow"></div>
-                    </div>
-                `,
-                iconSize: [80, 40],
-                iconAnchor: [40, 36]
+                html: `<div class="comic-marker ${className}"><div class="comic-bubble">${label}: ${value}${unit}</div><div class="comic-arrow"></div></div>`,
+                iconSize: [80, 40], iconAnchor: [40, 36]
             });
-            const m = L.marker([p.lat, p.lon], { icon: icon, interactive: false }).addTo(map);
-            statsMarkers.push(m);
+            statsMarkers.push(L.marker([p.lat, p.lon], { icon: icon, interactive: false }).addTo(map));
         };
 
         createMarker(stats.maxEleIdx, '最高', stats.maxEle.toFixed(0), 'm', 'marker-max-ele');
@@ -517,61 +698,37 @@
         createMarker(stats.maxSpeedIdx, '最快', (stats.maxSpeed * 3.6).toFixed(1), 'km/h', 'marker-max-speed');
     }
 
-    function resetMapView() {
-        if (trackPoints.length === 0) return;
-        const bounds = L.latLngBounds(trackPoints.map(p => [p.lat, p.lon]));
-        map.fitBounds(bounds, { padding: [50, 50], animate: true, duration: 0.8 });
-    }
-
-    function updateSegmentAvailability() {
-        document.querySelectorAll('.segment-btn').forEach(btn => {
-            const val = parseInt(btn.getAttribute('data-val'));
-            const invalid = val > totalDistance;
-            btn.style.opacity = invalid ? '0.3' : '1';
-            btn.style.pointerEvents = invalid ? 'none' : 'auto';
-        });
-    }
-
-    function toggleMode() {
-        currentMode = (currentMode + 1) % 3;
-        const modes = ["普通模式", "速度热力模式", "海拔热力模式"];
-        showToast(modes[currentMode]);
-        renderTrack();
-    }
-
-    function formatTime(ms) {
-        if (!ms) return "--:--:--";
-        return new Date(ms).toLocaleTimeString('zh-CN', { hour12: false });
-    }
-
     function updateByDistance(targetDist) {
-        if (trackPoints.length === 0) return;
+        if (activeFileIndex === -1) return;
+        const file = loadedFiles[activeFileIndex];
+        const { points, cumulativeDistances, totalDistance, stats } = file;
 
         targetDist = Math.max(0, Math.min(targetDist, totalDistance));
         currentDistanceValue = targetDist;
 
-        let low = 0, high = cumulativeDistances.length - 1;
         let i = 1;
+        let low = 0, high = cumulativeDistances.length - 1;
         while (low <= high) {
             let mid = Math.floor((low + high) / 2);
             if (cumulativeDistances[mid] < targetDist) { i = mid + 1; low = mid + 1; }
             else { high = mid - 1; }
         }
-        
-        if (i >= trackPoints.length) i = trackPoints.length - 1;
+        if (i >= points.length) i = points.length - 1;
         if (i < 1) i = 1;
 
-        const p1 = trackPoints[i - 1], p2 = trackPoints[i];
-        const d1 = cumulativeDistances[i - 1], d2 = cumulativeDistances[i];
-        const ratio = (d2 - d1) > 0 ? (targetDist - d1) / (d2 - d1) : 0;
+        const p1 = points[i-1], p2 = points[i];
+        const d1 = cumulativeDistances[i-1], d2 = cumulativeDistances[i];
+        const r = (d2 - d1) > 0 ? (targetDist - d1) / (d2 - d1) : 0;
 
-        const curLat = p1.lat + (p2.lat - p1.lat) * ratio;
-        const curLon = p1.lon + (p2.lon - p1.lon) * ratio;
-        const curEle = p1.ele + (p2.ele - p1.ele) * ratio;
-        const curSpeed = p1.speed + (p2.speed - p1.speed) * ratio;
-        const curTime = p1.time + (p2.time - p1.time) * ratio;
+        const cur = {
+            lat: p1.lat + (p2.lat - p1.lat) * r,
+            lon: p1.lon + (p2.lon - p1.lon) * r,
+            ele: p1.ele + (p2.ele - p1.ele) * r,
+            speed: p1.speed + (p2.speed - p1.speed) * r,
+            time: p1.time + (p2.time - p1.time) * r
+        };
 
-        indicatorMarker.setLatLng([curLat, curLon]);
+        indicatorMarker.setLatLng([cur.lat, cur.lon]);
         if (!map.hasLayer(indicatorMarker)) indicatorMarker.addTo(map);
 
         document.getElementById('progress-slider').value = (targetDist / totalDistance) * 1000;
@@ -579,48 +736,62 @@
         const overlay = document.getElementById('info-overlay');
         overlay.style.display = 'block';
         overlay.innerHTML = `
-            <div class="label-sm">总体统计</div>
+            <div class="label-sm">轨迹: ${file.name}</div>
             <b>距离:</b> ${(totalDistance/1000).toFixed(2)} km<br>
             <b>海拔:</b> ${stats.minEle.toFixed(0)}-${stats.maxEle.toFixed(0)} m<br>
             <b>最高速:</b> ${(stats.maxSpeed * 3.6).toFixed(1)} km/h
             <hr style="border:0; border-top:1px solid rgba(0,0,0,0.1); margin:6px 0;">
-            <div class="label-sm">当前位置 (插值)</div>
-            <b>时间:</b> ${formatTime(curTime)}<br>
-            <b>速度:</b> ${(curSpeed * 3.6).toFixed(1)} km/h<br>
-            <b>海拔:</b> ${curEle.toFixed(1)} m<br>
-            <b>进度:</b> ${targetDist.toFixed(1)}m / ${totalDistance.toFixed(0)}m
+            <div class="label-sm">当前插值位置</div>
+            <b>时间:</b> ${new Date(cur.time).toLocaleTimeString('zh-CN', { hour12: false })}<br>
+            <b>速度:</b> ${(cur.speed * 3.6).toFixed(1)} km/h<br>
+            <b>海拔:</b> ${cur.ele.toFixed(1)} m<br>
+            <b>进度:</b> ${targetDist.toFixed(1)}m
         `;
     }
 
+    function findNearestTrackPoint(clickedLatLng) {
+        if (activeFileIndex === -1) return;
+        const file = loadedFiles[activeFileIndex];
+        let minSqDist = Infinity, nearestIdx = 0;
+        for (let i = 0; i < file.points.length; i++) {
+            const p = file.points[i];
+            const sqDist = Math.pow(clickedLatLng.lat - p.lat, 2) + Math.pow(clickedLatLng.lng - p.lon, 2);
+            if (sqDist < minSqDist) { minSqDist = sqDist; nearestIdx = i; }
+        }
+        updateByDistance(file.cumulativeDistances[nearestIdx]);
+    }
+
+    function resetMapView() {
+        if (activeFileIndex === -1) return;
+        const bounds = L.latLngBounds(loadedFiles[activeFileIndex].points.map(p => [p.lat, p.lon]));
+        map.fitBounds(bounds, { padding: [50, 50], animate: true });
+    }
+
+    function toggleMode() {
+        currentMode = (currentMode + 1) % 3;
+        showToast(["普通模式", "速度热力模式", "海拔热力模式"][currentMode]);
+        renderTrack();
+    }
+
     function moveByDistance(direction) {
-        if (trackPoints.length === 0) return;
+        if (activeFileIndex === -1) return;
         updateByDistance(currentDistanceValue + (direction * currentStepValue));
     }
 
-    function renderTrack() {
-        polylines.forEach(p => map.removeLayer(p));
-        polylines = [];
+    function setupHoldableButton(id, action) {
+        const btn = document.getElementById(id);
+        const start = (e) => { e.preventDefault(); action(); holdTimer = setTimeout(() => { holdInterval = setInterval(action, 80); }, 400); };
+        const stop = () => { clearTimeout(holdTimer); clearInterval(holdInterval); };
+        ['mousedown', 'touchstart'].forEach(ev => btn.addEventListener(ev, start));
+        ['mouseup', 'mouseleave', 'touchend'].forEach(ev => btn.addEventListener(ev, stop));
+    }
 
-        if (currentMode === 0) {
-            const poly = L.polyline(trackPoints.map(p => [p.lat, p.lon]), { color: '#007AFF', weight: 5, opacity: 0.6 }).addTo(map);
-            polylines.push(poly);
-        } else {
-            // 热力模式下同样应用最高速过滤逻辑，防止颜色标度被噪点撑爆
-            const values = currentMode === 1 ? trackPoints.map(p => Math.min(p.speed, 160/3.6)) : trackPoints.map(p => p.ele);
-            const min = Math.min(...values), max = Math.max(...values);
-
-            for (let i = 1; i < trackPoints.length; i++) {
-                const ratio = (values[i] - min) / (max - min || 1);
-                const hue = currentMode === 1 ? ratio * 120 : (1 - ratio) * 120;
-                const segment = L.polyline([
-                    [trackPoints[i-1].lat, trackPoints[i-1].lon],
-                    [trackPoints[i].lat, trackPoints[i].lon]
-                ], { color: `hsl(${hue}, 100%, 45%)`, weight: 6, opacity: 0.85 }).addTo(map);
-                polylines.push(segment);
-            }
-        }
+    function showToast(msg) {
+        const t = document.getElementById('toast');
+        t.textContent = msg; t.style.display = 'block';
+        clearTimeout(window.toastTimer);
+        window.toastTimer = setTimeout(() => { t.style.display = 'none'; }, 1500);
     }
 </script>
-
 </body>
 </html>
