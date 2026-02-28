@@ -370,7 +370,6 @@
         let minSqDist = Infinity;
         let nearestIdx = 0;
 
-        // 简单线性查找最近点 (对于轨迹数据通常足够快)
         for (let i = 0; i < trackPoints.length; i++) {
             const p = trackPoints[i];
             const dy = clickedLatLng.lat - p.lat;
@@ -431,6 +430,7 @@
             maxSpeed: 0, maxSpeedIdx: -1 
         };
 
+        const rawPoints = [];
         for (let i = 0; i < trkpts.length; i++) {
             const pt = trkpts[i];
             const lat = parseFloat(pt.getAttribute("lat"));
@@ -438,20 +438,42 @@
             const ele = pt.getElementsByTagName("ele")[0] ? parseFloat(pt.getElementsByTagName("ele")[0].textContent) : 0;
             const timeStr = pt.getElementsByTagName("time")[0] ? pt.getElementsByTagName("time")[0].textContent : null;
             const time = timeStr ? new Date(timeStr).getTime() : 0;
+            rawPoints.push({ lat, lon, ele, time });
+        }
 
-            const currentPt = { lat, lon, ele, time };
+        // 速度过滤阈值 (160km/h)，可根据运动类型调整
+        const MAX_REASONABLE_SPEED = 160 / 3.6; 
+
+        for (let i = 0; i < rawPoints.length; i++) {
+            const currentPt = rawPoints[i];
             
-            if (ele > stats.maxEle) { stats.maxEle = ele; stats.maxEleIdx = i; }
-            if (ele < stats.minEle) { stats.minEle = ele; stats.minEleIdx = i; }
+            if (currentPt.ele > stats.maxEle) { stats.maxEle = currentPt.ele; stats.maxEleIdx = i; }
+            if (currentPt.ele < stats.minEle) { stats.minEle = currentPt.ele; stats.minEleIdx = i; }
 
             if (i > 0) {
-                const d = map.distance([trackPoints[i-1].lat, trackPoints[i-1].lon], [lat, lon]);
+                const d = map.distance([rawPoints[i-1].lat, rawPoints[i-1].lon], [currentPt.lat, currentPt.lon]);
                 totalDistance += d;
                 cumulativeDistances.push(totalDistance);
                 
-                const timeDiff = (time - trackPoints[i-1].time) / 1000;
-                currentPt.speed = timeDiff > 0 ? d / timeDiff : 0;
-                if (currentPt.speed > stats.maxSpeed) { stats.maxSpeed = currentPt.speed; stats.maxSpeedIdx = i; }
+                const timeDiff = (currentPt.time - rawPoints[i-1].time) / 1000;
+                let instantSpeed = timeDiff > 0.1 ? d / timeDiff : 0; // 过滤时间差过小的异常
+                
+                // 窗口平滑计算 (简单滑动平均，取前后点)
+                let smoothedSpeed = instantSpeed;
+                if (i > 1 && i < rawPoints.length - 1) {
+                    const dNext = map.distance([currentPt.lat, currentPt.lon], [rawPoints[i+1].lat, rawPoints[i+1].lon]);
+                    const tNext = (rawPoints[i+1].time - currentPt.time) / 1000;
+                    const speedNext = tNext > 0.1 ? dNext / tNext : instantSpeed;
+                    smoothedSpeed = (instantSpeed + speedNext) / 2;
+                }
+
+                currentPt.speed = smoothedSpeed;
+
+                // 记录最高速（增加合理性过滤）
+                if (currentPt.speed > stats.maxSpeed && currentPt.speed < MAX_REASONABLE_SPEED) { 
+                    stats.maxSpeed = currentPt.speed; 
+                    stats.maxSpeedIdx = i; 
+                }
             } else {
                 currentPt.speed = 0;
             }
@@ -492,7 +514,7 @@
 
         createMarker(stats.maxEleIdx, '最高', stats.maxEle.toFixed(0), 'm', 'marker-max-ele');
         createMarker(stats.minEleIdx, '最低', stats.minEle.toFixed(0), 'm', 'marker-min-ele');
-        createMarker(stats.maxSpeedIdx, '最快', (stats.maxSpeed * 3.6).toFixed(1), 'kph', 'marker-max-speed');
+        createMarker(stats.maxSpeedIdx, '最快', (stats.maxSpeed * 3.6).toFixed(1), 'km/h', 'marker-max-speed');
     }
 
     function resetMapView() {
@@ -583,7 +605,8 @@
             const poly = L.polyline(trackPoints.map(p => [p.lat, p.lon]), { color: '#007AFF', weight: 5, opacity: 0.6 }).addTo(map);
             polylines.push(poly);
         } else {
-            const values = currentMode === 1 ? trackPoints.map(p => p.speed) : trackPoints.map(p => p.ele);
+            // 热力模式下同样应用最高速过滤逻辑，防止颜色标度被噪点撑爆
+            const values = currentMode === 1 ? trackPoints.map(p => Math.min(p.speed, 160/3.6)) : trackPoints.map(p => p.ele);
             const min = Math.min(...values), max = Math.max(...values);
 
             for (let i = 1; i < trackPoints.length; i++) {
