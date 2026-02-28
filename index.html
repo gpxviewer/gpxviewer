@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root {
-            --primary-bg: rgba(255, 255, 255, 0.9);
+            --primary-bg: rgba(255, 255, 255, 0.7); /* 降低透明度 */
             --accent-color: #007AFF;
             --danger-color: #FF3B30;
         }
@@ -73,16 +73,16 @@
 
         .panel-glass {
             background: var(--primary-bg);
-            backdrop-filter: blur(15px);
-            -webkit-backdrop-filter: blur(15px);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
             border-radius: 20px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.15);
             padding: 8px 12px;
             display: flex;
             align-items: center;
         }
 
-        /* 辅助按钮样式 (模式切换/复位) */
+        /* 辅助按钮样式 */
         .btn-side {
             width: 44px;
             height: 44px;
@@ -99,7 +99,6 @@
             flex-shrink: 0;
         }
 
-        /* 分段选择器样式 */
         .segmented-control {
             display: flex;
             background: rgba(0,0,0,0.05);
@@ -130,13 +129,12 @@
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
-        /* 加减按钮 */
         .btn-circle {
             width: 40px;
             height: 40px;
             border-radius: 20px;
             border: none;
-            background: #f0f0f0;
+            background: rgba(0,0,0,0.05);
             color: var(--accent-color);
             font-size: 20px;
             font-weight: bold;
@@ -149,11 +147,6 @@
             flex-shrink: 0;
         }
 
-        .btn-circle:active {
-            background: #d1d1d6;
-        }
-
-        /* 进度条样式 */
         #progress-slider-container {
             width: 100%;
         }
@@ -182,29 +175,82 @@
             box-shadow: 0 2px 6px rgba(0,0,0,0.3);
         }
 
-        /* 信息提示 */
+        /* 信息提示面板 */
         #info-overlay {
             position: absolute;
             top: 20px;
             right: 15px;
             background: var(--primary-bg);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
             padding: 12px;
             border-radius: 16px;
-            font-size: 13px;
+            font-size: 12px;
             z-index: 1000;
             display: none;
             box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            line-height: 1.6;
+            line-height: 1.5;
+            min-width: 150px;
+            border: 1px solid rgba(255,255,255,0.3);
         }
 
         .label-sm {
             font-size: 10px;
-            color: #888;
+            color: #555;
+            font-weight: bold;
             text-transform: uppercase;
             margin-bottom: 2px;
         }
+
+        /* Toast 样式 */
+        #toast {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.75);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            z-index: 2000;
+            display: none;
+            pointer-events: none;
+        }
+
+        /* 漫画气泡样式标记 */
+        .comic-marker {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .comic-bubble {
+            background: white;
+            border: 2px solid #333;
+            border-radius: 12px;
+            padding: 2px 6px;
+            font-size: 10px;
+            font-weight: bold;
+            white-space: nowrap;
+            box-shadow: 2px 2px 0px rgba(0,0,0,0.2);
+            position: relative;
+        }
+        .comic-arrow {
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 6px solid #333;
+            margin-top: -1px;
+        }
+        .marker-max-speed .comic-bubble { color: #FF9500; border-color: #FF9500; }
+        .marker-max-speed .comic-arrow { border-top-color: #FF9500; }
+        .marker-max-ele .comic-bubble { color: #FF3B30; border-color: #FF3B30; }
+        .marker-max-ele .comic-arrow { border-top-color: #FF3B30; }
+        .marker-min-ele .comic-bubble { color: #34C759; border-color: #34C759; }
+        .marker-min-ele .comic-arrow { border-top-color: #34C759; }
+
     </style>
 </head>
 <body>
@@ -217,9 +263,9 @@
 </div>
 
 <div id="info-overlay"></div>
+<div id="toast">提示信息</div>
 
 <div id="controls-wrapper">
-    <!-- 进度条行 -->
     <div class="controls-row">
         <div class="panel-glass" style="flex-grow: 1;">
             <div id="progress-slider-container">
@@ -228,27 +274,9 @@
         </div>
     </div>
 
-    <!-- 底部按钮组合行 -->
     <div class="controls-row">
-        <!-- 地图复位按钮 -->
-        <button id="reset-view" class="btn-side" title="复位地图">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;">
-                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-                <path d="M3 3v5h5"></path>
-            </svg>
-        </button>
-
-        <!-- 模式切换按钮 -->
-        <button id="mode-toggle" class="btn-side" title="切换渲染模式">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;">
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-            </svg>
-        </button>
-        
-        <!-- 主操作面板 -->
         <div class="panel-glass" style="flex-grow: 1; padding: 6px 10px;">
             <button class="btn-circle" id="step-minus">−</button>
-            
             <div class="segmented-control" id="step-segments">
                 <button class="segment-btn" data-val="1">1m</button>
                 <button class="segment-btn" data-val="10">10m</button>
@@ -256,28 +284,43 @@
                 <button class="segment-btn" data-val="1000">1k</button>
                 <button class="segment-btn" data-val="10000">10k</button>
             </div>
-
             <button class="btn-circle" id="step-plus">+</button>
+        </div>
+
+        <div style="display: flex; gap: 8px;">
+            <button id="mode-toggle" class="btn-side" title="切换渲染模式">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                </svg>
+            </button>
+            <button id="reset-view" class="btn-side" title="复位地图">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                    <path d="M3 3v5h5"></path>
+                </svg>
+            </button>
         </div>
     </div>
 </div>
 
-<!-- Leaflet JS -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    let map, trackPoints = [], polylines = [];
+    let map, trackPoints = [], polylines = [], statsMarkers = [];
     let currentMode = 0; 
     let indicatorMarker;
-    let currentDistanceValue = 0; // 当前所在轨道的距离位置 (meters)
+    let currentDistanceValue = 0;
     
-    // 步进设置
+    let stats = {
+        maxEle: -Infinity, maxEleIdx: -1,
+        minEle: Infinity, minEleIdx: -1,
+        maxSpeed: 0, maxSpeedIdx: -1
+    };
+
     let currentStepValue = 100;
     let totalDistance = 0;
     let cumulativeDistances = []; 
 
-    // 长按相关
-    let holdTimer = null;
-    let holdInterval = null;
+    let holdTimer = null, holdInterval = null;
 
     window.onload = function() {
         map = L.map('map', {
@@ -299,7 +342,12 @@
         document.getElementById('mode-toggle').addEventListener('click', toggleMode);
         document.getElementById('reset-view').addEventListener('click', resetMapView);
         
-        // 分段选择器事件
+        // 地图点击事件：查找最近点
+        map.on('click', function(e) {
+            if (trackPoints.length === 0) return;
+            findNearestTrackPoint(e.latlng);
+        });
+
         document.querySelectorAll('.segment-btn').forEach(btn => {
             btn.addEventListener('click', function() {
                 document.querySelectorAll('.segment-btn').forEach(b => b.classList.remove('active'));
@@ -308,7 +356,6 @@
             });
         });
 
-        // 加减按钮 - 点击与长按
         setupHoldableButton('step-plus', () => moveByDistance(1));
         setupHoldableButton('step-minus', () => moveByDistance(-1));
 
@@ -319,29 +366,47 @@
         });
     };
 
+    function findNearestTrackPoint(clickedLatLng) {
+        let minSqDist = Infinity;
+        let nearestIdx = 0;
+
+        // 简单线性查找最近点 (对于轨迹数据通常足够快)
+        for (let i = 0; i < trackPoints.length; i++) {
+            const p = trackPoints[i];
+            const dy = clickedLatLng.lat - p.lat;
+            const dx = clickedLatLng.lng - p.lon;
+            const sqDist = dx * dx + dy * dy;
+            if (sqDist < minSqDist) {
+                minSqDist = sqDist;
+                nearestIdx = i;
+            }
+        }
+
+        const targetDist = cumulativeDistances[nearestIdx];
+        updateByDistance(targetDist);
+    }
+
+    function showToast(msg) {
+        const toast = document.getElementById('toast');
+        toast.textContent = msg;
+        toast.style.display = 'block';
+        clearTimeout(window.toastTimer);
+        window.toastTimer = setTimeout(() => { toast.style.display = 'none'; }, 1500);
+    }
+
     function setupHoldableButton(id, action) {
         const btn = document.getElementById(id);
-        
         const start = (e) => {
             e.preventDefault();
             action();
-            holdTimer = setTimeout(() => {
-                holdInterval = setInterval(action, 80);
-            }, 400);
+            holdTimer = setTimeout(() => { holdInterval = setInterval(action, 80); }, 400);
         };
-
-        const stop = () => {
-            clearTimeout(holdTimer);
-            clearInterval(holdInterval);
-        };
-
+        const stop = () => { clearTimeout(holdTimer); clearInterval(holdInterval); };
         btn.addEventListener('mousedown', start);
         btn.addEventListener('mouseup', stop);
         btn.addEventListener('mouseleave', stop);
-        
         btn.addEventListener('touchstart', start);
         btn.addEventListener('touchend', stop);
-        btn.addEventListener('touchcancel', stop);
     }
 
     function handleFileSelect(evt) {
@@ -360,6 +425,11 @@
         trackPoints = [];
         cumulativeDistances = [0];
         totalDistance = 0;
+        stats = { 
+            maxEle: -Infinity, maxEleIdx: -1, 
+            minEle: Infinity, minEleIdx: -1, 
+            maxSpeed: 0, maxSpeedIdx: -1 
+        };
 
         for (let i = 0; i < trkpts.length; i++) {
             const pt = trkpts[i];
@@ -371,6 +441,9 @@
 
             const currentPt = { lat, lon, ele, time };
             
+            if (ele > stats.maxEle) { stats.maxEle = ele; stats.maxEleIdx = i; }
+            if (ele < stats.minEle) { stats.minEle = ele; stats.minEleIdx = i; }
+
             if (i > 0) {
                 const d = map.distance([trackPoints[i-1].lat, trackPoints[i-1].lon], [lat, lon]);
                 totalDistance += d;
@@ -378,6 +451,7 @@
                 
                 const timeDiff = (time - trackPoints[i-1].time) / 1000;
                 currentPt.speed = timeDiff > 0 ? d / timeDiff : 0;
+                if (currentPt.speed > stats.maxSpeed) { stats.maxSpeed = currentPt.speed; stats.maxSpeedIdx = i; }
             } else {
                 currentPt.speed = 0;
             }
@@ -388,38 +462,64 @@
 
         document.getElementById('progress-slider').disabled = false;
         renderTrack();
+        addStatsMarkers();
         resetMapView();
-        
         updateByDistance(0);
         updateSegmentAvailability();
+    }
+
+    function addStatsMarkers() {
+        statsMarkers.forEach(m => map.removeLayer(m));
+        statsMarkers = [];
+
+        const createMarker = (idx, label, value, unit, className) => {
+            if (idx === -1) return;
+            const p = trackPoints[idx];
+            const icon = L.divIcon({
+                className: '',
+                html: `
+                    <div class="comic-marker ${className}">
+                        <div class="comic-bubble">${label}: ${value}${unit}</div>
+                        <div class="comic-arrow"></div>
+                    </div>
+                `,
+                iconSize: [80, 40],
+                iconAnchor: [40, 36]
+            });
+            const m = L.marker([p.lat, p.lon], { icon: icon, interactive: false }).addTo(map);
+            statsMarkers.push(m);
+        };
+
+        createMarker(stats.maxEleIdx, '最高', stats.maxEle.toFixed(0), 'm', 'marker-max-ele');
+        createMarker(stats.minEleIdx, '最低', stats.minEle.toFixed(0), 'm', 'marker-min-ele');
+        createMarker(stats.maxSpeedIdx, '最快', (stats.maxSpeed * 3.6).toFixed(1), 'kph', 'marker-max-speed');
     }
 
     function resetMapView() {
         if (trackPoints.length === 0) return;
         const bounds = L.latLngBounds(trackPoints.map(p => [p.lat, p.lon]));
-        map.fitBounds(bounds, { 
-            padding: [50, 50], 
-            animate: true,
-            duration: 0.8
-        });
+        map.fitBounds(bounds, { padding: [50, 50], animate: true, duration: 0.8 });
     }
 
     function updateSegmentAvailability() {
         document.querySelectorAll('.segment-btn').forEach(btn => {
             const val = parseInt(btn.getAttribute('data-val'));
-            if (val > totalDistance) {
-                btn.style.opacity = '0.3';
-                btn.style.pointerEvents = 'none';
-            } else {
-                btn.style.opacity = '1';
-                btn.style.pointerEvents = 'auto';
-            }
+            const invalid = val > totalDistance;
+            btn.style.opacity = invalid ? '0.3' : '1';
+            btn.style.pointerEvents = invalid ? 'none' : 'auto';
         });
     }
 
     function toggleMode() {
         currentMode = (currentMode + 1) % 3;
+        const modes = ["普通模式", "速度热力模式", "海拔热力模式"];
+        showToast(modes[currentMode]);
         renderTrack();
+    }
+
+    function formatTime(ms) {
+        if (!ms) return "--:--:--";
+        return new Date(ms).toLocaleTimeString('zh-CN', { hour12: false });
     }
 
     function updateByDistance(targetDist) {
@@ -432,31 +532,24 @@
         let i = 1;
         while (low <= high) {
             let mid = Math.floor((low + high) / 2);
-            if (cumulativeDistances[mid] < targetDist) {
-                i = mid + 1;
-                low = mid + 1;
-            } else {
-                high = mid - 1;
-            }
+            if (cumulativeDistances[mid] < targetDist) { i = mid + 1; low = mid + 1; }
+            else { high = mid - 1; }
         }
         
         if (i >= trackPoints.length) i = trackPoints.length - 1;
         if (i < 1) i = 1;
 
-        const p1 = trackPoints[i - 1];
-        const p2 = trackPoints[i];
-        const d1 = cumulativeDistances[i - 1];
-        const d2 = cumulativeDistances[i];
+        const p1 = trackPoints[i - 1], p2 = trackPoints[i];
+        const d1 = cumulativeDistances[i - 1], d2 = cumulativeDistances[i];
+        const ratio = (d2 - d1) > 0 ? (targetDist - d1) / (d2 - d1) : 0;
 
-        const segmentDist = d2 - d1;
-        const ratio = segmentDist > 0 ? (targetDist - d1) / segmentDist : 0;
+        const curLat = p1.lat + (p2.lat - p1.lat) * ratio;
+        const curLon = p1.lon + (p2.lon - p1.lon) * ratio;
+        const curEle = p1.ele + (p2.ele - p1.ele) * ratio;
+        const curSpeed = p1.speed + (p2.speed - p1.speed) * ratio;
+        const curTime = p1.time + (p2.time - p1.time) * ratio;
 
-        const currentLat = p1.lat + (p2.lat - p1.lat) * ratio;
-        const currentLon = p1.lon + (p2.lon - p1.lon) * ratio;
-        const currentEle = p1.ele + (p2.ele - p1.ele) * ratio;
-        const currentSpeed = p1.speed + (p2.speed - p1.speed) * ratio;
-
-        indicatorMarker.setLatLng([currentLat, currentLon]);
+        indicatorMarker.setLatLng([curLat, curLon]);
         if (!map.hasLayer(indicatorMarker)) indicatorMarker.addTo(map);
 
         document.getElementById('progress-slider').value = (targetDist / totalDistance) * 1000;
@@ -464,20 +557,22 @@
         const overlay = document.getElementById('info-overlay');
         overlay.style.display = 'block';
         overlay.innerHTML = `
-            <div class="label-sm">总体轨迹</div>
-            <b>距离:</b> ${(totalDistance/1000).toFixed(2)} km | <b>点数:</b> ${trackPoints.length}
-            <hr style="border:0; border-top:1px solid #ddd; margin:8px 0;">
-            <div class="label-sm">当前位置 (平滑插值)</div>
-            <b>速度:</b> ${(currentSpeed * 3.6).toFixed(1)} km/h<br>
-            <b>海拔:</b> ${currentEle.toFixed(1)} m<br>
+            <div class="label-sm">总体统计</div>
+            <b>距离:</b> ${(totalDistance/1000).toFixed(2)} km<br>
+            <b>海拔:</b> ${stats.minEle.toFixed(0)}-${stats.maxEle.toFixed(0)} m<br>
+            <b>最高速:</b> ${(stats.maxSpeed * 3.6).toFixed(1)} km/h
+            <hr style="border:0; border-top:1px solid rgba(0,0,0,0.1); margin:6px 0;">
+            <div class="label-sm">当前位置 (插值)</div>
+            <b>时间:</b> ${formatTime(curTime)}<br>
+            <b>速度:</b> ${(curSpeed * 3.6).toFixed(1)} km/h<br>
+            <b>海拔:</b> ${curEle.toFixed(1)} m<br>
             <b>进度:</b> ${targetDist.toFixed(1)}m / ${totalDistance.toFixed(0)}m
         `;
     }
 
     function moveByDistance(direction) {
         if (trackPoints.length === 0) return;
-        const targetDist = currentDistanceValue + (direction * currentStepValue);
-        updateByDistance(targetDist);
+        updateByDistance(currentDistanceValue + (direction * currentStepValue));
     }
 
     function renderTrack() {
@@ -485,7 +580,7 @@
         polylines = [];
 
         if (currentMode === 0) {
-            const poly = L.polyline(trackPoints.map(p => [p.lat, p.lon]), { color: '#007AFF', weight: 5, opacity: 0.7 }).addTo(map);
+            const poly = L.polyline(trackPoints.map(p => [p.lat, p.lon]), { color: '#007AFF', weight: 5, opacity: 0.6 }).addTo(map);
             polylines.push(poly);
         } else {
             const values = currentMode === 1 ? trackPoints.map(p => p.speed) : trackPoints.map(p => p.ele);
@@ -497,7 +592,7 @@
                 const segment = L.polyline([
                     [trackPoints[i-1].lat, trackPoints[i-1].lon],
                     [trackPoints[i].lat, trackPoints[i].lon]
-                ], { color: `hsl(${hue}, 100%, 45%)`, weight: 6, opacity: 0.9 }).addTo(map);
+                ], { color: `hsl(${hue}, 100%, 45%)`, weight: 6, opacity: 0.85 }).addTo(map);
                 polylines.push(segment);
             }
         }
