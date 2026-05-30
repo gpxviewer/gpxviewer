@@ -13,6 +13,10 @@
             --accent-color: #007AFF;
             --danger-color: #FF3B30;
             --panel-width: 300px;
+            --control-btn-size: 48px;
+            --control-panel-height: calc(var(--control-btn-size) + 16px);
+            --chart-height: 150px;
+            --chart-gap: 12px;
         }
 
         body,
@@ -62,8 +66,6 @@
             width: var(--panel-width);
             height: 100%;
             background: var(--primary-bg);
-            backdrop-filter: blur(25px) saturate(180%);
-            -webkit-backdrop-filter: blur(25px) saturate(180%);
             z-index: 1100;
             box-shadow: -5px 0 20px rgba(0, 0, 0, 0.1);
             display: flex;
@@ -235,7 +237,70 @@
             flex-direction: column;
             gap: 12px;
             pointer-events: none;
+        }
+
+        .controls-grid {
+            position: relative;
+            pointer-events: auto;
+            width: 100%;
             max-width: 500px;
+        }
+
+        .controls-main {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .track-chart-wrap {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: calc(100% + var(--chart-gap));
+            background: var(--primary-bg);
+            border-radius: 20px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+            padding: 8px 12px;
+            box-sizing: border-box;
+            cursor: crosshair;
+            height: var(--chart-height);
+            display: flex;
+            align-items: stretch;
+            pointer-events: auto;
+        }
+
+        .track-chart-wrap.hidden {
+            display: none;
+        }
+
+        #track-chart {
+            display: block;
+            width: 100%;
+            height: 100%;
+            flex: 1;
+        }
+
+        @media (min-width: 768px) {
+            .controls-grid {
+                display: grid;
+                grid-template-columns: 500px 1fr;
+                column-gap: var(--chart-gap);
+                max-width: none;
+                align-items: end;
+            }
+
+            .controls-main {
+                grid-column: 1;
+                grid-row: 1;
+            }
+
+            .track-chart-wrap {
+                position: static;
+                grid-column: 2;
+                grid-row: 1;
+                align-self: end;
+                min-width: 140px;
+            }
         }
 
         .controls-row {
@@ -247,8 +312,6 @@
 
         .panel-glass {
             background: var(--primary-bg);
-            backdrop-filter: blur(15px);
-            -webkit-backdrop-filter: blur(15px);
             border-radius: 20px;
             box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
             padding: 8px 12px;
@@ -608,11 +671,15 @@
     </div>
 
     <div id="controls-wrapper">
-        <div class="controls-row slider-row">
-            <input type="range" id="progress-slider" min="0" max="1000" value="0" disabled>
-        </div>
-
-        <div class="controls-row">
+        <div class="controls-grid">
+            <div id="track-chart-wrap" class="track-chart-wrap hidden">
+                <canvas id="track-chart"></canvas>
+            </div>
+            <div class="controls-main">
+                <div class="controls-row slider-row">
+                    <input type="range" id="progress-slider" min="0" max="1000" value="0" disabled>
+                </div>
+                <div class="controls-row controls-bottom-row">
             <div class="panel-glass" style="flex-grow: 1; padding: 6px 10px;">
                 <button class="btn-side" id="step-minus" style="width:36px; height:36px; background:rgba(0,0,0,0.05); color:#007AFF; box-shadow:none;">−</button>
                 <div class="segmented-control">
@@ -638,6 +705,8 @@
                     </svg>
                 </button>
             </div>
+            </div>
+            </div>
         </div>
     </div>
 
@@ -654,6 +723,11 @@
         let holdTimer = null, holdInterval = null;
         let navLat = 0, navLon = 0;
         let navCoordSys = 'gcj02';
+
+        const CHART_PAD = { t: 4, r: 6, b: 6, l: 28 };
+        const CHART_ELEVATION_GRID_LINES = 5;
+        const CHART_ELEVATION_GRID_COLOR = 'rgba(60, 60, 67, 0.55)';
+        const CHART_ELEVATION_GRID_DASH = [5, 5];
 
         const NAV_CRS_ORDER = ['wgs84', 'gcj02', 'bd09'];
         const NAV_CRS_LABELS = { wgs84: 'WGS-84', gcj02: 'GCJ-02', bd09: 'BD-09' };
@@ -755,7 +829,155 @@
                 const dist = (e.target.value / 1000) * loadedFiles[activeFileIndex].totalDistance;
                 updateByDistance(dist);
             });
+
+            document.getElementById('track-chart').addEventListener('click', handleChartClick);
+            window.addEventListener('resize', () => {
+                clearTimeout(window.chartResizeTimer);
+                window.chartResizeTimer = setTimeout(renderTrackChart, 120);
+            });
         };
+
+        function getChartValue(point, mode) {
+            if (mode === 1) return Math.min(point.speed, 40) * 3.6;
+            return point.ele;
+        }
+
+        function buildChartSamples(cumulativeDistances, values, maxSamples = 600) {
+            const n = values.length;
+            if (n <= maxSamples) {
+                return cumulativeDistances.map((dist, i) => ({ dist, val: values[i] }));
+            }
+            const samples = [];
+            const step = (n - 1) / (maxSamples - 1);
+            for (let s = 0; s < maxSamples; s++) {
+                const i = Math.min(n - 1, Math.round(s * step));
+                samples.push({ dist: cumulativeDistances[i], val: values[i] });
+            }
+            return samples;
+        }
+
+        function renderTrackChart() {
+            const wrap = document.getElementById('track-chart-wrap');
+            if (currentMode === 0 || activeFileIndex === -1) {
+                wrap.classList.add('hidden');
+                return;
+            }
+            wrap.classList.remove('hidden');
+
+            const canvas = document.getElementById('track-chart');
+            const ctx = canvas.getContext('2d');
+            const file = loadedFiles[activeFileIndex];
+            const { points, cumulativeDistances, totalDistance } = file;
+            const mode = currentMode;
+            const values = points.map(p => getChartValue(p, mode));
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            const range = max - min || 1;
+
+            const rect = canvas.getBoundingClientRect();
+            if (rect.width < 1 || rect.height < 1) return;
+
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = Math.round(rect.width * dpr);
+            canvas.height = Math.round(rect.height * dpr);
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            const W = rect.width;
+            const H = rect.height;
+            const pad = CHART_PAD;
+            const chartW = W - pad.l - pad.r;
+            const chartH = H - pad.t - pad.b;
+
+            ctx.clearRect(0, 0, W, H);
+
+            ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(pad.l, pad.t + chartH);
+            ctx.lineTo(pad.l + chartW, pad.t + chartH);
+            ctx.stroke();
+
+            const samples = buildChartSamples(cumulativeDistances, values);
+            for (let i = 1; i < samples.length; i++) {
+                const ratio = (samples[i].val - min) / range;
+                const hue = mode === 1 ? ratio * 120 : (1 - ratio) * 120;
+                const x1 = pad.l + (samples[i - 1].dist / totalDistance) * chartW;
+                const y1 = pad.t + chartH - ((samples[i - 1].val - min) / range) * chartH;
+                const x2 = pad.l + (samples[i].dist / totalDistance) * chartW;
+                const y2 = pad.t + chartH - ((samples[i].val - min) / range) * chartH;
+                ctx.beginPath();
+                ctx.strokeStyle = `hsl(${hue}, 100%, 45%)`;
+                ctx.lineWidth = 2;
+                ctx.lineJoin = 'round';
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+            }
+
+            if (mode === 2 && CHART_ELEVATION_GRID_LINES > 0) {
+                drawElevationGridLines(ctx, pad, chartW, chartH);
+            }
+
+            ctx.fillStyle = '#888';
+            ctx.font = '9px -apple-system, sans-serif';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(max.toFixed(mode === 1 ? 0 : 0), pad.l - 4, pad.t + 6);
+            ctx.fillText(min.toFixed(0), pad.l - 4, pad.t + chartH - 2);
+
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'alphabetic';
+            ctx.fillStyle = '#666';
+            ctx.font = '10px -apple-system, sans-serif';
+            ctx.fillText(mode === 1 ? '速度 km/h' : '海拔 m', pad.l, 10);
+
+            drawChartCursor(ctx, currentDistanceValue, totalDistance, pad, chartW, chartH);
+        }
+
+        function drawElevationGridLines(ctx, pad, chartW, chartH) {
+            ctx.save();
+            ctx.strokeStyle = CHART_ELEVATION_GRID_COLOR;
+            ctx.lineWidth = 1;
+            ctx.setLineDash(CHART_ELEVATION_GRID_DASH);
+            for (let g = 1; g <= CHART_ELEVATION_GRID_LINES; g++) {
+                const y = pad.t + chartH * (1 - g / (CHART_ELEVATION_GRID_LINES + 1));
+                ctx.beginPath();
+                ctx.moveTo(pad.l, y);
+                ctx.lineTo(pad.l + chartW, y);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        function drawChartCursor(ctx, dist, totalDistance, pad, chartW, chartH) {
+            if (!totalDistance) return;
+            const x = pad.l + (dist / totalDistance) * chartW;
+            ctx.save();
+            ctx.strokeStyle = '#007AFF';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.moveTo(x, pad.t);
+            ctx.lineTo(x, pad.t + chartH);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#007AFF';
+            ctx.beginPath();
+            ctx.arc(x, pad.t + chartH, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function handleChartClick(e) {
+            if (activeFileIndex === -1 || currentMode === 0) return;
+            const canvas = document.getElementById('track-chart');
+            const rect = canvas.getBoundingClientRect();
+            const pad = CHART_PAD;
+            const chartW = rect.width - pad.l - pad.r;
+            const x = e.clientX - rect.left - pad.l;
+            const ratio = Math.max(0, Math.min(1, x / chartW));
+            updateByDistance(ratio * loadedFiles[activeFileIndex].totalDistance);
+        }
 
         function togglePanel(show) {
             const panel = document.getElementById('file-panel');
@@ -868,6 +1090,7 @@
             addStatsMarkers();
             resetMapView();
             updateByDistance(0);
+            renderTrackChart();
             renderFileList();
             if (closePanel) togglePanel(false);
         }
@@ -890,6 +1113,7 @@
             document.getElementById('info-overlay').style.display = 'none';
             document.getElementById('progress-slider').disabled = true;
             updateTrackNavVisibility();
+            renderTrackChart();
         }
 
         function renderTrack() {
@@ -983,6 +1207,7 @@
                 </span>
             </div>
         `;
+            renderTrackChart();
         }
 
         function getNavCoords(crs) {
@@ -1108,6 +1333,7 @@
             currentMode = (currentMode + 1) % 3;
             showToast(["普通模式", "速度热力", "海拔热力"][currentMode]);
             renderTrack();
+            renderTrackChart();
         }
 
         function moveByDistance(direction) {
