@@ -305,12 +305,161 @@
             transition: background 0.15s;
         }
 
+        .nav-coords {
+            cursor: pointer;
+            border-radius: 6px;
+            padding: 1px 4px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: background 0.15s;
+            color: inherit;
+        }
+
+        .nav-coords:hover,
         .copy-coords:hover {
             background: rgba(0, 122, 255, 0.12);
         }
 
+        .nav-coords:active,
         .copy-coords:active {
             background: rgba(0, 122, 255, 0.22);
+        }
+
+        .nav-coords-icon {
+            width: 14px;
+            height: 14px;
+            color: var(--accent-color);
+            flex-shrink: 0;
+        }
+
+        #nav-sheet-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.4);
+            z-index: 3000;
+            display: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        #nav-sheet-overlay.open {
+            opacity: 1;
+        }
+
+        #nav-sheet {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.96);
+            border-radius: 16px 16px 0 0;
+            z-index: 3001;
+            transform: translateY(100%);
+            transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+            padding-bottom: max(16px, env(safe-area-inset-bottom));
+            box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.12);
+        }
+
+        #nav-sheet.open {
+            transform: translateY(0);
+        }
+
+        .nav-sheet-handle {
+            width: 36px;
+            height: 4px;
+            background: rgba(0, 0, 0, 0.15);
+            border-radius: 2px;
+            margin: 10px auto 0;
+        }
+
+        .nav-sheet-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #222;
+        }
+
+        .nav-sheet-header {
+            padding: 14px 20px 6px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .nav-sheet-crs {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 5px 14px;
+            border: none;
+            background: rgba(0, 122, 255, 0.1);
+            color: var(--accent-color);
+            font-size: 13px;
+            font-weight: 600;
+            border-radius: 20px;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .nav-sheet-crs:active {
+            background: rgba(0, 122, 255, 0.2);
+        }
+
+        .nav-sheet-crs-hint {
+            font-size: 10px;
+            font-weight: 400;
+            color: #999;
+        }
+
+        .nav-sheet-coords {
+            padding: 0 20px 12px;
+            font-size: 12px;
+            color: #888;
+            text-align: center;
+        }
+
+        .nav-sheet-options {
+            padding: 0 16px;
+        }
+
+        .nav-sheet-option {
+            display: block;
+            width: 100%;
+            padding: 14px;
+            margin-bottom: 2px;
+            border: none;
+            background: transparent;
+            font-size: 16px;
+            color: var(--accent-color);
+            cursor: pointer;
+            border-radius: 12px;
+            text-align: center;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .nav-sheet-option:active {
+            background: rgba(0, 122, 255, 0.08);
+        }
+
+        .nav-sheet-cancel {
+            display: block;
+            width: calc(100% - 32px);
+            margin: 8px 16px 0;
+            padding: 14px;
+            border: none;
+            background: rgba(0, 0, 0, 0.05);
+            font-size: 16px;
+            font-weight: 600;
+            color: #555;
+            cursor: pointer;
+            border-radius: 14px;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .nav-sheet-cancel:active {
+            background: rgba(0, 0, 0, 0.1);
         }
 
         .slider-row {
@@ -437,6 +586,27 @@
     <div id="info-overlay"></div>
     <div id="toast">提示信息</div>
 
+    <div id="nav-sheet-overlay" onclick="closeNavSheet()"></div>
+    <div id="nav-sheet" onclick="event.stopPropagation()">
+        <div class="nav-sheet-handle"></div>
+        <div class="nav-sheet-header">
+            <div class="nav-sheet-title">导航到该地点</div>
+            <button type="button" class="nav-sheet-crs" id="nav-sheet-crs" onclick="toggleNavCoordSys(event)">
+                WGS-84 <span class="nav-sheet-crs-hint">点击切换</span>
+            </button>
+        </div>
+        <div class="nav-sheet-coords" id="nav-sheet-coords"></div>
+        <div class="nav-sheet-options">
+            <button class="nav-sheet-option" onclick="navAction('copy')">复制经纬度</button>
+            <button class="nav-sheet-option" onclick="navAction('amap')">高德地图</button>
+            <button class="nav-sheet-option" onclick="navAction('baidu')">百度地图</button>
+            <button class="nav-sheet-option" onclick="navAction('tencent')">腾讯地图</button>
+            <button class="nav-sheet-option" onclick="navAction('google')">谷歌地图</button>
+            <button class="nav-sheet-option" onclick="navAction('system')">系统地图</button>
+        </div>
+        <button class="nav-sheet-cancel" onclick="closeNavSheet()">取消</button>
+    </div>
+
     <div id="controls-wrapper">
         <div class="controls-row slider-row">
             <input type="range" id="progress-slider" min="0" max="1000" value="0" disabled>
@@ -482,6 +652,69 @@
         let currentDistanceValue = 0;
         let currentStepValue = 100;
         let holdTimer = null, holdInterval = null;
+        let navLat = 0, navLon = 0;
+        let navCoordSys = 'gcj02';
+
+        const NAV_CRS_ORDER = ['wgs84', 'gcj02', 'bd09'];
+        const NAV_CRS_LABELS = { wgs84: 'WGS-84', gcj02: 'GCJ-02', bd09: 'BD-09' };
+
+        const NAV_ICON_SVG = `<svg class="nav-coords-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"></polygon></svg>`;
+
+        const CoordTransform = (() => {
+            const PI = Math.PI;
+            const A = 6378245.0;
+            const EE = 0.00669342162296594323;
+
+            function outOfChina(lat, lon) {
+                return lon < 72.004 || lon > 137.8347 || lat < 0.8293 || lat > 55.8271;
+            }
+
+            function transformLat(x, y) {
+                let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+                ret += (20.0 * Math.sin(6.0 * x * PI) + 20.0 * Math.sin(2.0 * x * PI)) * 2.0 / 3.0;
+                ret += (20.0 * Math.sin(y * PI) + 40.0 * Math.sin(y / 3.0 * PI)) * 2.0 / 3.0;
+                ret += (160.0 * Math.sin(y / 12.0 * PI) + 320 * Math.sin(y * PI / 30.0)) * 2.0 / 3.0;
+                return ret;
+            }
+
+            function transformLon(x, y) {
+                let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+                ret += (20.0 * Math.sin(6.0 * x * PI) + 20.0 * Math.sin(2.0 * x * PI)) * 2.0 / 3.0;
+                ret += (20.0 * Math.sin(x * PI) + 40.0 * Math.sin(x / 3.0 * PI)) * 2.0 / 3.0;
+                ret += (150.0 * Math.sin(x / 12.0 * PI) + 300.0 * Math.sin(x / 30.0 * PI)) * 2.0 / 3.0;
+                return ret;
+            }
+
+            function wgs84ToGcj02(lat, lon) {
+                if (outOfChina(lat, lon)) return { lat, lon };
+                let dLat = transformLat(lon - 105.0, lat - 35.0);
+                let dLon = transformLon(lon - 105.0, lat - 35.0);
+                const radLat = lat / 180.0 * PI;
+                let magic = Math.sin(radLat);
+                magic = 1 - EE * magic * magic;
+                const sqrtMagic = Math.sqrt(magic);
+                dLat = (dLat * 180.0) / ((A * (1 - EE)) / (magic * sqrtMagic) * PI);
+                dLon = (dLon * 180.0) / (A / sqrtMagic * Math.cos(radLat) * PI);
+                return { lat: lat + dLat, lon: lon + dLon };
+            }
+
+            function gcj02ToBd09(lat, lon) {
+                const z = Math.sqrt(lon * lon + lat * lat) + 0.00002 * Math.sin(lat * PI * 3000.0 / 180.0);
+                const theta = Math.atan2(lat, lon) + 0.000003 * Math.cos(lon * PI * 3000.0 / 180.0);
+                return { lat: z * Math.sin(theta) + 0.006, lon: z * Math.cos(theta) + 0.0065 };
+            }
+
+            function fromWgs84(lat, lon, crs) {
+                if (crs === 'gcj02') return wgs84ToGcj02(lat, lon);
+                if (crs === 'bd09') {
+                    const gcj = wgs84ToGcj02(lat, lon);
+                    return gcj02ToBd09(gcj.lat, gcj.lon);
+                }
+                return { lat, lon };
+            }
+
+            return { fromWgs84 };
+        })();
 
         window.onload = function () {
             map = L.map('map', { zoomControl: false, attributionControl: false }).setView([34, 108], 5);
@@ -745,11 +978,96 @@
                 <span style="color:#888">当前海拔:</span> <b>${cur.ele.toFixed(1)} <small>m</small></b>
                 <span style="color:#888">累计距离:</span> <b>${(targetDist / 1000).toFixed(2)} <small>km</small></b>
                 <span style="color:#888">经纬度:</span>
-                <span class="copy-coords" onclick="copyCoords(${latFull}, ${lonFull})" title="点击复制完整坐标">
-                    <b>${latDisplay}, ${lonDisplay}</b>
+                <span class="nav-coords" onclick="openNavSheet(${latFull}, ${lonFull})" title="导航到该地点">
+                    <b>${latDisplay}, ${lonDisplay}</b>${NAV_ICON_SVG}
                 </span>
             </div>
         `;
+        }
+
+        function getNavCoords(crs) {
+            return CoordTransform.fromWgs84(navLat, navLon, crs || navCoordSys);
+        }
+
+        function updateNavSheetDisplay() {
+            const { lat, lon } = getNavCoords(navCoordSys);
+            document.getElementById('nav-sheet-crs').innerHTML =
+                `${NAV_CRS_LABELS[navCoordSys]} <span class="nav-sheet-crs-hint">点击切换坐标系</span>`;
+            document.getElementById('nav-sheet-coords').textContent = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+        }
+
+        function toggleNavCoordSys(e) {
+            e.stopPropagation();
+            const idx = NAV_CRS_ORDER.indexOf(navCoordSys);
+            navCoordSys = NAV_CRS_ORDER[(idx + 1) % NAV_CRS_ORDER.length];
+            updateNavSheetDisplay();
+            showToast(`已切换为 ${NAV_CRS_LABELS[navCoordSys]}`);
+        }
+
+        function openNavSheet(lat, lon) {
+            navLat = Number(lat);
+            navLon = Number(lon);
+            navCoordSys = 'gcj02';
+            updateNavSheetDisplay();
+            const overlay = document.getElementById('nav-sheet-overlay');
+            const sheet = document.getElementById('nav-sheet');
+            overlay.style.display = 'block';
+            requestAnimationFrame(() => {
+                overlay.classList.add('open');
+                sheet.classList.add('open');
+            });
+        }
+
+        function closeNavSheet() {
+            const overlay = document.getElementById('nav-sheet-overlay');
+            const sheet = document.getElementById('nav-sheet');
+            overlay.classList.remove('open');
+            sheet.classList.remove('open');
+            setTimeout(() => {
+                if (!sheet.classList.contains('open')) overlay.style.display = 'none';
+            }, 350);
+        }
+
+        function navAction(type) {
+            const { lat, lon } = getNavCoords(navCoordSys);
+            const lat6 = lat.toFixed(6);
+            const lon6 = lon.toFixed(6);
+            const name = encodeURIComponent('目的地');
+
+            closeNavSheet();
+
+            if (type === 'copy') {
+                copyCoords(lat, lon);
+                return;
+            }
+
+            let url;
+            switch (type) {
+                case 'amap':
+                    url = `https://uri.amap.com/marker?position=${lon6},${lat6}&name=${name}`;
+                    break;
+                case 'baidu':
+                    url = `https://api.map.baidu.com/marker?location=${lat6},${lon6}&title=${name}&content=${name}&output=html&src=GPXViewer`;
+                    break;
+                case 'tencent':
+                    url = `https://apis.map.qq.com/uri/v1/marker?marker=coord:${lat6},${lon6};title:${name}`;
+                    break;
+                case 'google':
+                    url = `https://www.google.com/maps/search/?api=1&query=${lat6},${lon6}`;
+                    break;
+                case 'system':
+                    url = `geo:${lat6},${lon6}?q=${lat6},${lon6}(目的地)`;
+                    break;
+            }
+
+            if (url) {
+                if (type === 'system') {
+                    window.location.href = url;
+                } else {
+                    const opened = window.open(url, '_blank');
+                    if (!opened) window.location.href = url;
+                }
+            }
         }
 
         function copyCoords(lat, lon) {
