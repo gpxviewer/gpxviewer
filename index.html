@@ -722,7 +722,28 @@
             font-size: 12px;
             z-index: 1000;
             display: none;
-            min-width: 160px;
+            min-width: 200px;
+        }
+
+        .info-delta {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid rgba(0, 0, 0, 0.08);
+            display: grid;
+            grid-template-columns: 1fr 1.5fr;
+            gap: 4px;
+        }
+
+        .info-delta-label {
+            color: #888;
+        }
+
+        .info-delta-up {
+            color: #34C759;
+        }
+
+        .info-delta-down {
+            color: #FF9500;
         }
 
         #toast {
@@ -876,7 +897,10 @@
         let pinnedStopMarker = null;
         let currentMode = 0;
         let indicatorMarker;
+        let prevIndicatorMarker = null;
         let currentDistanceValue = 0;
+        let prevCurrentPoint = null;
+        let chartSegmentRange = null;
         let currentStepValue = 100;
         let holdTimer = null, holdInterval = null;
         let navLat = 0, navLon = 0;
@@ -1194,7 +1218,7 @@
             slider.addEventListener('input', (e) => {
                 if (activeFileIndex === -1) return;
                 const dist = (e.target.value / 1000) * loadedFiles[activeFileIndex].totalDistance;
-                updateByDistance(dist);
+                updateByDistance(dist, { skipSegment: true });
             });
 
             document.getElementById('track-chart').addEventListener('click', handleChartClick);
@@ -1285,6 +1309,10 @@
                 drawElevationGridLines(ctx, pad, chartW, chartH);
             }
 
+            if (chartSegmentRange && Math.abs(chartSegmentRange.to - chartSegmentRange.from) > 0.01) {
+                drawChartSegmentHighlight(ctx, chartSegmentRange.from, chartSegmentRange.to, totalDistance, pad, chartW, chartH);
+            }
+
             ctx.fillStyle = '#888';
             ctx.font = '9px -apple-system, sans-serif';
             ctx.textAlign = 'right';
@@ -1299,6 +1327,44 @@
             ctx.fillText(mode === 1 ? '速度 km/h' : '海拔 m', pad.l, 10);
 
             drawChartCursor(ctx, currentDistanceValue, totalDistance, pad, chartW, chartH);
+            if (chartSegmentRange && Math.abs(chartSegmentRange.to - chartSegmentRange.from) > 0.01) {
+                drawChartPrevMarker(ctx, chartSegmentRange.from, totalDistance, pad, chartW, chartH);
+            }
+        }
+
+        function drawChartSegmentHighlight(ctx, distFrom, distTo, totalDistance, pad, chartW, chartH) {
+            if (!totalDistance) return;
+            const d0 = Math.min(distFrom, distTo);
+            const d1 = Math.max(distFrom, distTo);
+            const x0 = pad.l + (d0 / totalDistance) * chartW;
+            const x1 = pad.l + (d1 / totalDistance) * chartW;
+            if (x1 - x0 < 1) return;
+            ctx.save();
+            ctx.fillStyle = 'rgba(0, 122, 255, 0.22)';
+            ctx.fillRect(x0, pad.t, x1 - x0, chartH);
+            ctx.strokeStyle = 'rgba(0, 122, 255, 0.45)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x0, pad.t, x1 - x0, chartH);
+            ctx.restore();
+        }
+
+        function drawChartPrevMarker(ctx, dist, totalDistance, pad, chartW, chartH) {
+            if (!totalDistance) return;
+            const x = pad.l + (dist / totalDistance) * chartW;
+            ctx.save();
+            ctx.strokeStyle = '#FF9500';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(x, pad.t);
+            ctx.lineTo(x, pad.t + chartH);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#FF9500';
+            ctx.beginPath();
+            ctx.arc(x, pad.t + chartH, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
         }
 
         function drawElevationGridLines(ctx, pad, chartW, chartH) {
@@ -1807,6 +1873,8 @@
             addStatsMarkers();
             addStopMarkers();
             resetMapView();
+            prevCurrentPoint = null;
+            chartSegmentRange = null;
             updateByDistance(0);
             renderTrackChart();
             renderFileList();
@@ -1829,8 +1897,11 @@
             statsMarkers.forEach(m => map.removeLayer(m));
             stopMarkers.forEach(m => map.removeLayer(m));
             if (map.hasLayer(indicatorMarker)) map.removeLayer(indicatorMarker);
+            hidePrevIndicatorMarker();
             document.getElementById('info-overlay').style.display = 'none';
             document.getElementById('progress-slider').disabled = true;
+            prevCurrentPoint = null;
+            chartSegmentRange = null;
             updateTrackNavVisibility();
             renderTrackChart();
         }
@@ -1947,13 +2018,94 @@
             });
         }
 
-        function updateByDistance(targetDist) {
-            if (activeFileIndex === -1) return;
-            const file = loadedFiles[activeFileIndex];
-            const { points, cumulativeDistances, totalDistance } = file;
-            targetDist = Math.max(0, Math.min(targetDist, totalDistance));
-            currentDistanceValue = targetDist;
+        function formatDisplacement(m) {
+            if (m < 1000) {
+                return m < 100 ? `${m.toFixed(1)} m` : `${Math.round(m)} m`;
+            }
+            return `${(m / 1000).toFixed(2)} km`;
+        }
 
+        function formatEleDelta(m) {
+            if (Math.abs(m) < 0.05) return '0 m';
+            const sign = m > 0 ? '+' : '';
+            return `${sign}${m.toFixed(1)} m`;
+        }
+
+        function eleDeltaClass(m) {
+            if (m > 0.05) return 'info-delta-up';
+            if (m < -0.05) return 'info-delta-down';
+            return '';
+        }
+
+        function formatGrade(eleDelta, routeDelta) {
+            if (Math.abs(routeDelta) < 0.01) return '--';
+            const grade = (eleDelta / routeDelta) * 100;
+            if (Math.abs(grade) < 0.05) return '0%';
+            const sign = grade > 0 ? '+' : '';
+            return `${sign}${grade.toFixed(1)}%`;
+        }
+
+        function stopOverlapMs(stops, t0, t1) {
+            if (!t0 || !t1) return 0;
+            const a = Math.min(t0, t1), b = Math.max(t0, t1);
+            if (b <= a) return 0;
+            let overlap = 0;
+            for (const stop of stops) {
+                if (!stop.startTime || !stop.endTime) continue;
+                const o0 = Math.max(a, stop.startTime);
+                const o1 = Math.min(b, stop.endTime);
+                if (o1 > o0) overlap += o1 - o0;
+            }
+            return overlap;
+        }
+
+        function buildPointDeltaHtml(prev, cur, stops) {
+            const routeDelta = cur.dist - prev.dist;
+            const eleDelta = cur.ele - prev.ele;
+            const moved = Math.abs(routeDelta) > 0.01 || Math.abs(eleDelta) > 0.05;
+            if (!moved) return '';
+
+            const grade = formatGrade(eleDelta, routeDelta);
+            const gradeClass = grade === '--' ? '' : eleDeltaClass(eleDelta);
+
+            let timeRows = '';
+            if (prev.time && cur.time) {
+                const tStart = Math.min(prev.time, cur.time);
+                const tEnd = Math.max(prev.time, cur.time);
+                const totalMs = tEnd - tStart;
+                const stopMs = stopOverlapMs(stops, tStart, tEnd);
+                const travelMs = Math.max(0, totalMs - stopMs);
+                const routeDist = Math.abs(routeDelta);
+                let avgSpeedHtml = '';
+                if (travelMs > 0 && routeDist > 0.01) {
+                    const avgKmh = (routeDist / (travelMs / 1000)) * 3.6;
+                    avgSpeedHtml = `
+                <span class="info-delta-label">行驶均速:</span>
+                <b title="行驶距离 ÷ 行驶用时">${avgKmh.toFixed(1)} <small>km/h</small></b>`;
+                }
+                timeRows = `
+                <span class="info-delta-label">总用时:</span>
+                <b title="上一点至当前点的经过时间">${formatDurationMs(totalMs)}</b>`;
+                if (stopMs > 0) {
+                    timeRows += `
+                <span class="info-delta-label">行驶用时:</span>
+                <b title="总用时减去区间内停靠停留">${formatDurationMs(travelMs)}</b>`;
+                }
+                timeRows += avgSpeedHtml;
+            }
+
+            return `<div class="info-delta">
+                <span class="info-delta-label">行驶:</span>
+                <b title="沿轨迹的累计距离变化">${formatDisplacement(Math.abs(routeDelta))}</b>
+                <span class="info-delta-label">海拔差:</span>
+                <b class="${eleDeltaClass(eleDelta)}">${formatEleDelta(eleDelta)}</b>
+                <span class="info-delta-label">坡度:</span>
+                <b class="${gradeClass}" title="海拔差 ÷ 行驶距离">${grade}</b>
+                ${timeRows}
+            </div>`;
+        }
+
+        function interpolatePointAtDistance(points, cumulativeDistances, targetDist) {
             let i = 1;
             while (i < cumulativeDistances.length && cumulativeDistances[i] < targetDist) i++;
             if (i >= points.length) i = points.length - 1;
@@ -1962,14 +2114,71 @@
             const d1 = cumulativeDistances[i - 1], d2 = cumulativeDistances[i];
             const r = (d2 - d1) > 0 ? (targetDist - d1) / (d2 - d1) : 0;
 
-            const cur = {
-                lat: p1.lat + (p2.lat - p1.lat) * r, lon: p1.lon + (p2.lon - p1.lon) * r,
-                ele: p1.ele + (p2.ele - p1.ele) * r, speed: p1.speed + (p2.speed - p1.speed) * r,
-                time: p1.time + (p2.time - p1.time) * r
+            return {
+                lat: p1.lat + (p2.lat - p1.lat) * r,
+                lon: p1.lon + (p2.lon - p1.lon) * r,
+                ele: p1.ele + (p2.ele - p1.ele) * r,
+                speed: p1.speed + (p2.speed - p1.speed) * r,
+                time: p1.time + (p2.time - p1.time) * r,
+                dist: targetDist
             };
+        }
+
+        function ensurePrevIndicatorMarker() {
+            if (!prevIndicatorMarker) {
+                const icon = L.divIcon({
+                    className: 'custom-prev-indicator',
+                    html: `<div style="background-color:#FF9500;border:3px solid white;width:14px;height:14px;border-radius:50%;box-shadow:0 0 8px rgba(0,0,0,0.35);"></div>`,
+                    iconSize: [18, 18],
+                    iconAnchor: [9, 9]
+                });
+                prevIndicatorMarker = L.marker([0, 0], { icon, zIndexOffset: 950 });
+            }
+            return prevIndicatorMarker;
+        }
+
+        function updatePrevIndicatorMarker() {
+            if (!chartSegmentRange || Math.abs(chartSegmentRange.to - chartSegmentRange.from) < 0.01 || activeFileIndex === -1) {
+                hidePrevIndicatorMarker();
+                return;
+            }
+            const file = loadedFiles[activeFileIndex];
+            const prev = interpolatePointAtDistance(file.points, file.cumulativeDistances, chartSegmentRange.from);
+            const marker = ensurePrevIndicatorMarker();
+            marker.setLatLng(mapLatLng(prev.lat, prev.lon));
+            if (!map.hasLayer(marker)) marker.addTo(map);
+        }
+
+        function hidePrevIndicatorMarker() {
+            if (prevIndicatorMarker && map.hasLayer(prevIndicatorMarker)) {
+                map.removeLayer(prevIndicatorMarker);
+            }
+        }
+
+        function updateByDistance(targetDist, opts = {}) {
+            if (activeFileIndex === -1) return;
+            const skipSegment = opts.skipSegment === true;
+            const file = loadedFiles[activeFileIndex];
+            const { points, cumulativeDistances, totalDistance } = file;
+            targetDist = Math.max(0, Math.min(targetDist, totalDistance));
+            currentDistanceValue = targetDist;
+
+            const cur = interpolatePointAtDistance(points, cumulativeDistances, targetDist);
+
+            let deltaHtml = '';
+            if (!skipSegment && prevCurrentPoint) {
+                deltaHtml = buildPointDeltaHtml(prevCurrentPoint, cur, file.stops || []);
+                if (Math.abs(targetDist - prevCurrentPoint.dist) > 0.01) {
+                    chartSegmentRange = { from: prevCurrentPoint.dist, to: targetDist };
+                }
+            } else if (skipSegment) {
+                chartSegmentRange = null;
+            }
+            prevCurrentPoint = { lat: cur.lat, lon: cur.lon, ele: cur.ele, dist: targetDist, time: cur.time };
 
             indicatorMarker.setLatLng(mapLatLng(cur.lat, cur.lon));
             if (!map.hasLayer(indicatorMarker)) indicatorMarker.addTo(map);
+            updatePrevIndicatorMarker();
             document.getElementById('progress-slider').value = (targetDist / totalDistance) * 1000;
 
             const overlay = document.getElementById('info-overlay');
@@ -1996,6 +2205,7 @@
                     <b>${latDisplay}, ${lonDisplay}</b>${NAV_ICON_SVG}
                 </span>
             </div>
+            ${deltaHtml}
         `;
             renderTrackChart();
         }
