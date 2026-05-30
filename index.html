@@ -12,11 +12,11 @@
             --primary-bg: rgba(255, 255, 255, 0.42);
             --accent-color: #007AFF;
             --danger-color: #FF3B30;
-            --panel-width: 300px;
+            --panel-width: 300px;           /* 侧边文件列表面板宽度 */
             --control-btn-size: 48px;
             --control-panel-height: calc(var(--control-btn-size) + 16px);
-            --chart-height: 150px;
-            --chart-gap: 12px;
+            --chart-height: 150px;            /* 进度条上方速度/海拔曲线图高度 */
+            --chart-gap: 12px;                /* 曲线图与底部控制栏之间的间距 */
         }
 
         body,
@@ -795,8 +795,8 @@
         let currentStepValue = 100;
         let holdTimer = null, holdInterval = null;
         let navLat = 0, navLon = 0;
-        let navCoordSys = 'gcj02';
-        let currentMapProvider = 'osm';
+        let navCoordSys = 'gcj02'; // 导航坐标系默认：'wgs84' | 'gcj02' | 'bd09'
+        let currentMapProvider = 'osm'; // 默认底图，可选值见 MAP_PROVIDERS
         let baseTileLayer = null;
 
         const MAP_PROVIDERS = [
@@ -867,17 +867,36 @@
             return layer;
         }
 
+        // ── 可手动调整的配置常量 ──────────────────────────────────────────
+
+        // 曲线图：内边距（上/右/下/左，单位 px）与海拔模式网格线样式
         const CHART_PAD = { t: 4, r: 6, b: 6, l: 28 };
-        const CHART_ELEVATION_GRID_LINES = 5;
+        const CHART_ELEVATION_GRID_LINES = 5;              // 海拔图横向虚线网格条数，0 为关闭
         const CHART_ELEVATION_GRID_COLOR = 'rgba(60, 60, 67, 0.55)';
-        const CHART_ELEVATION_GRID_DASH = [5, 5];
+        const CHART_ELEVATION_GRID_DASH = [5, 5];          // 虚线样式 [实线长, 间隔长]
+        const CHART_MAX_SAMPLES = 600;                     // 曲线降采样上限，轨迹点过多时提升性能
 
-        const SPEED_MIN_DT_SEC = 1.0;
-        const SPEED_MAX_MS = 45;
+        // 速度计算：GPX 无 speed 标签时由相邻点距离/时间推算
+        const SPEED_MIN_DT_SEC = 1.0;   // 推算速度时至少取这么长的前后时间窗口（秒）
+        const SPEED_MAX_MS = 45;        // 单点速度上限（m/s），约 162 km/h，超出视为 GPS 跳点
 
-        const STOP_RADIUS_M = 1000;
-        const STOP_MIN_DURATION_MS = 3600 * 1000;
+        // GPX speed 单位自动识别（metadata maxspeed 通常为 m/s，GPS Tracker 的 trkpt speed 常为 km/h）
+        const SPEED_UNIT_META_RATIO = 2;       // trkpt 最大值 > metadata × 此倍数 → 判定为 km/h
+        const SPEED_UNIT_KMH_THRESHOLD = 25;   // 无 metadata 时，trkpt 最大值超过此值（m/s 不合理）→ 判定为 km/h
 
+        // 停靠点：在半径内连续停留达到最小时长才标记
+        const STOP_RADIUS_M = 1000;              // 判定为「同一地点」的最大半径（米）
+        const STOP_MIN_DURATION_MS = 3600 * 1000; // 最短停留时长（毫秒），默认 1 小时
+
+        // 海拔清洗：过滤气压计/GPS 异常跳变，异常段用前后有效值线性插值
+        const ELE_MIN = 0;                  // 合理海拔下限（米）；死海等场景可改为负数如 -500
+        const ELE_MAX_JUMP_M = 60;          // 相邻点时间间隔 ≥10 分钟时，允许的最大海拔差（米）
+        const ELE_MAX_VERT_MS = 8;          // 相邻点垂直变化速率上限（m/s）；飞机轨迹需调大或关闭清洗
+        const ELE_RATE_MAX_DT_SEC = 600;    // 超过此时间间隔（秒）不再用速率规则，仅用 ELE_MAX_JUMP_M
+        const ELE_SPIKE_DEV_M = 50;         // 尖峰检测：偏离前后邻居中值超过此值（米）才考虑剔除
+        const ELE_SPIKE_EXTRA_M = 30;       // 尖峰检测：额外要求偏离量大于邻居间距 + 此值（米）
+
+        // 导航面板坐标系选项（顺序与显示名称）
         const NAV_CRS_ORDER = ['wgs84', 'gcj02', 'bd09'];
         const NAV_CRS_LABELS = { wgs84: 'WGS-84', gcj02: 'GCJ-02', bd09: 'BD-09' };
 
@@ -1094,7 +1113,7 @@
             return point.ele;
         }
 
-        function buildChartSamples(cumulativeDistances, values, maxSamples = 600) {
+        function buildChartSamples(cumulativeDistances, values, maxSamples = CHART_MAX_SAMPLES) {
             const n = values.length;
             if (n <= maxSamples) {
                 return cumulativeDistances.map((dist, i) => ({ dist, val: values[i] }));
@@ -1308,6 +1327,75 @@
             return stops;
         }
 
+        function recomputeEleStats(points, stats) {
+            stats.maxEle = -Infinity;
+            stats.maxEleIdx = -1;
+            stats.minEle = Infinity;
+            stats.minEleIdx = -1;
+            points.forEach((p, i) => {
+                if (p.ele > stats.maxEle) { stats.maxEle = p.ele; stats.maxEleIdx = i; }
+                if (p.ele < stats.minEle) { stats.minEle = p.ele; stats.minEleIdx = i; }
+            });
+        }
+
+        function sanitizeElevations(points) {
+            const n = points.length;
+            if (n === 0) return;
+            const valid = new Array(n).fill(true);
+
+            for (let i = 0; i < n; i++) {
+                if (!Number.isFinite(points[i].ele) || points[i].ele < ELE_MIN) {
+                    valid[i] = false;
+                }
+            }
+
+            for (let i = 1; i < n; i++) {
+                if (!valid[i] || !valid[i - 1]) continue;
+                const dt = (points[i].time - points[i - 1].time) / 1000;
+                const delta = Math.abs(points[i].ele - points[i - 1].ele);
+                let limit = ELE_MAX_JUMP_M;
+                if (dt > 0 && dt < ELE_RATE_MAX_DT_SEC) {
+                    limit = Math.max(ELE_MAX_JUMP_M, ELE_MAX_VERT_MS * dt);
+                }
+                if (delta > limit) valid[i] = false;
+            }
+
+            for (let i = 1; i < n - 1; i++) {
+                if (!valid[i]) continue;
+                const vals = [];
+                if (valid[i - 1]) vals.push(points[i - 1].ele);
+                if (valid[i + 1]) vals.push(points[i + 1].ele);
+                if (vals.length < 2) continue;
+                const mid = (vals[0] + vals[1]) / 2;
+                const spread = Math.abs(vals[1] - vals[0]);
+                if (Math.abs(points[i].ele - mid) > ELE_SPIKE_DEV_M && Math.abs(points[i].ele - mid) > spread + ELE_SPIKE_EXTRA_M) {
+                    valid[i] = false;
+                }
+            }
+
+            let i = 0;
+            while (i < n) {
+                if (valid[i]) { i++; continue; }
+                const gapStart = i;
+                while (i < n && !valid[i]) i++;
+                const left = gapStart - 1;
+                const right = i;
+                if (left >= 0 && right < n && valid[left] && valid[right]) {
+                    const span = right - left;
+                    for (let j = gapStart; j < right; j++) {
+                        const t = (j - left) / span;
+                        points[j].ele = points[left].ele + (points[right].ele - points[left].ele) * t;
+                    }
+                } else if (left >= 0 && valid[left]) {
+                    for (let j = gapStart; j < right; j++) points[j].ele = points[left].ele;
+                } else if (right < n && valid[right]) {
+                    for (let j = gapStart; j < right; j++) points[j].ele = points[right].ele;
+                } else {
+                    for (let j = gapStart; j < right; j++) points[j].ele = ELE_MIN;
+                }
+            }
+        }
+
         function parseTrkptSpeed(pt) {
             for (let i = 0; i < pt.children.length; i++) {
                 const child = pt.children[i];
@@ -1345,10 +1433,10 @@
             const metaMax = parseMetadataMaxSpeed(xmlDoc);
 
             // metadata maxspeed 通常为 m/s；若 trkpt 数值明显更大，则 trkpt 为 km/h
-            if (metaMax != null && metaMax > 0 && maxTrkpt > metaMax * 2) {
+            if (metaMax != null && metaMax > 0 && maxTrkpt > metaMax * SPEED_UNIT_META_RATIO) {
                 return 'kmh';
             }
-            if (maxTrkpt > 25) return 'kmh';
+            if (maxTrkpt > SPEED_UNIT_KMH_THRESHOLD) return 'kmh';
             return 'ms';
         }
 
@@ -1424,8 +1512,6 @@
             for (let i = 0; i < raw.length; i++) {
                 const cur = raw[i];
                 cur.speed = speeds[i];
-                if (cur.ele > stats.maxEle) { stats.maxEle = cur.ele; stats.maxEleIdx = i; }
-                if (cur.ele < stats.minEle) { stats.minEle = cur.ele; stats.minEleIdx = i; }
                 if (cur.speed > stats.maxSpeed) { stats.maxSpeed = cur.speed; stats.maxSpeedIdx = i; }
                 if (i > 0) {
                     const d = haversineDistance(raw[i - 1].lat, raw[i - 1].lon, cur.lat, cur.lon);
@@ -1434,6 +1520,8 @@
                 }
                 points.push(cur);
             }
+            sanitizeElevations(points);
+            recomputeEleStats(points, stats);
             const stops = detectStopPoints(points);
             return { id: Date.now() + Math.random(), name: fileName, points, cumulativeDistances, totalDistance: totalDist, stats, stops };
         }
