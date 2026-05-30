@@ -12,7 +12,7 @@
             --primary-bg: rgba(255, 255, 255, 0.42);
             --accent-color: #007AFF;
             --danger-color: #FF3B30;
-            --panel-width: 300px;           /* 侧边文件列表面板宽度 */
+            --panel-width: 300px;           /* 侧边文件列表面板宽度（需容纳缩略图 + 完整文件名） */
             --control-btn-size: 48px;
             --control-panel-height: calc(var(--control-btn-size) + 16px);
             --chart-height: 150px;            /* 进度条上方速度/海拔曲线图高度 */
@@ -95,14 +95,15 @@
         }
 
         .file-item {
-            padding: 14px 16px;
+            padding: 12px 14px;
             margin-bottom: 10px;
             background: rgba(255, 255, 255, 0.4);
             border-radius: 14px;
             cursor: pointer;
             display: flex;
             justify-content: space-between;
-            align-items: center;
+            align-items: flex-start;
+            gap: 10px;
             transition: all 0.2s;
             border: 1px solid rgba(0, 0, 0, 0.03);
         }
@@ -113,26 +114,67 @@
             box-shadow: 0 4px 12px rgba(0, 122, 255, 0.15);
         }
 
+        .file-item.active .file-thumb {
+            border-color: rgba(0, 122, 255, 0.35);
+        }
+
+        .file-thumb {
+            flex-shrink: 0;
+            width: 80px;
+            height: 56px;
+            border-radius: 8px;
+            overflow: hidden;
+            background: rgba(255, 255, 255, 0.55);
+            border: 1px solid rgba(0, 0, 0, 0.06);
+        }
+
+        .file-thumb img {
+            width: 100%;
+            height: 100%;
+            display: block;
+            pointer-events: none;
+        }
+
+        .file-thumb-pending {
+            background: linear-gradient(135deg, rgba(0, 0, 0, 0.04) 25%, rgba(0, 0, 0, 0.08) 50%, rgba(0, 0, 0, 0.04) 75%);
+            background-size: 200% 200%;
+            animation: thumb-shimmer 1.2s ease-in-out infinite;
+        }
+
+        @keyframes thumb-shimmer {
+            0% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        .file-item-body {
+            flex: 1;
+            min-width: 0;
+        }
+
         .file-name {
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 600;
             color: #222;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            line-height: 1.35;
+            white-space: normal;
+            overflow-wrap: anywhere;
+            word-break: break-all;
         }
 
         .file-meta {
             font-size: 11px;
             color: #666;
             margin-top: 4px;
+            white-space: nowrap;
         }
 
         .btn-delete {
             color: #aaa;
-            padding: 8px;
+            padding: 4px 6px;
             font-size: 18px;
             cursor: pointer;
+            flex-shrink: 0;
+            line-height: 1;
         }
 
         .btn-delete:hover {
@@ -227,7 +269,8 @@
         }
 
         .stop-marker {
-            pointer-events: none;
+            background: transparent;
+            border: none;
         }
 
         .stop-marker-dot {
@@ -244,6 +287,47 @@
             border: 2px solid rgba(255, 255, 255, 0.85);
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
             line-height: 1;
+            cursor: pointer;
+        }
+
+        .leaflet-tooltip.stop-tooltip {
+            background: rgba(255, 255, 255, 0.96);
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+            padding: 0;
+            font-size: 12px;
+            color: #333;
+        }
+
+        .leaflet-tooltip-top.stop-tooltip::before {
+            border-top-color: rgba(255, 255, 255, 0.96);
+        }
+
+        .stop-tooltip-inner {
+            padding: 10px 12px;
+            min-width: 168px;
+        }
+
+        .stop-tooltip-title {
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: #2c2c2e;
+            font-size: 13px;
+        }
+
+        .stop-tooltip-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-top: 4px;
+            color: #888;
+        }
+
+        .stop-tooltip-row b {
+            color: #222;
+            font-weight: 600;
+            text-align: right;
         }
 
         /* 控件区域样式 */
@@ -789,6 +873,7 @@
         let loadedFiles = [];
         let activeFileIndex = -1;
         let polylines = [], statsMarkers = [], stopMarkers = [];
+        let pinnedStopMarker = null;
         let currentMode = 0;
         let indicatorMarker;
         let currentDistanceValue = 0;
@@ -876,6 +961,16 @@
         const CHART_ELEVATION_GRID_DASH = [5, 5];          // 虚线样式 [实线长, 间隔长]
         const CHART_MAX_SAMPLES = 600;                     // 曲线降采样上限，轨迹点过多时提升性能
 
+        // 列表缩略图：离屏 canvas 绘制轨迹折线，解析后异步生成并缓存
+        const THUMB_WIDTH = 80;
+        const THUMB_HEIGHT = 56;
+        const THUMB_MAX_SAMPLES = 120;                     // 缩略图最多采样点数
+        const THUMB_PAD = 4;                               // 画布内边距（px）
+        const THUMB_LINE_COLOR = '#007AFF';
+        const THUMB_JPEG_QUALITY = 0.85;
+
+        let thumbCanvas = null;
+
         // 速度计算：GPX 无 speed 标签时由相邻点距离/时间推算
         const SPEED_MIN_DT_SEC = 1.0;   // 推算速度时至少取这么长的前后时间窗口（秒）
         const SPEED_MAX_MS = 45;        // 单点速度上限（m/s），约 162 km/h，超出视为 GPS 跳点
@@ -884,8 +979,8 @@
         const SPEED_UNIT_META_RATIO = 2;       // trkpt 最大值 > metadata × 此倍数 → 判定为 km/h
         const SPEED_UNIT_KMH_THRESHOLD = 25;   // 无 metadata 时，trkpt 最大值超过此值（m/s 不合理）→ 判定为 km/h
 
-        // 停靠点：在半径内连续停留达到最小时长才标记
-        const STOP_RADIUS_M = 1000;              // 判定为「同一地点」的最大半径（米）
+        // 停靠点：在半径内连续停留达到最小时长才标记；位置按停留时长加权（非简单算术平均）
+        const STOP_RADIUS_M = 1000;              // 判定为「同一地点」的最大半径（米，相对区间质心）
         const STOP_MIN_DURATION_MS = 3600 * 1000; // 最短停留时长（毫秒），默认 1 小时
 
         // 海拔清洗：过滤气压计/GPS 异常跳变，异常段用前后有效值线性插值
@@ -1079,6 +1174,7 @@
             document.getElementById('panel-overlay').addEventListener('click', () => togglePanel(false));
 
             map.on('click', (e) => {
+                closeAllStopTooltips();
                 if (activeFileIndex === -1) return;
                 findNearestTrackPoint(e.latlng);
             });
@@ -1270,7 +1366,11 @@
                 try {
                     const text = await file.text();
                     const trackData = parseGPXData(text, file.name);
-                    if (trackData) loadedFiles.push(trackData);
+                    if (trackData) {
+                        trackData.thumbnail = null;
+                        loadedFiles.push(trackData);
+                        scheduleTrackThumbnail(trackData);
+                    }
                 } catch (err) { console.error("解析失败", err); }
             }
             renderFileList();
@@ -1294,6 +1394,39 @@
 
             let clusterStart = 0;
 
+            function clusterCentroid(start, end) {
+                let latSum = 0, lonSum = 0;
+                for (let j = start; j <= end; j++) {
+                    latSum += points[j].lat;
+                    lonSum += points[j].lon;
+                }
+                const n = end - start + 1;
+                return { lat: latSum / n, lon: lonSum / n };
+            }
+
+            function stopPosition(start, end) {
+                let latSum = 0, lonSum = 0, weightSum = 0;
+                for (let j = start; j <= end; j++) {
+                    let dt = 0;
+                    if (j < end) {
+                        const tA = points[j].time, tB = points[j + 1].time;
+                        if (tA && tB && tB > tA) dt = tB - tA;
+                    } else if (j > start) {
+                        const tA = points[j - 1].time, tB = points[j].time;
+                        if (tA && tB && tB > tA) dt = tB - tA;
+                    }
+                    if (dt > 0) {
+                        latSum += points[j].lat * dt;
+                        lonSum += points[j].lon * dt;
+                        weightSum += dt;
+                    }
+                }
+                if (weightSum > 0) {
+                    return { lat: latSum / weightSum, lon: lonSum / weightSum };
+                }
+                return clusterCentroid(start, end);
+            }
+
             const finalizeCluster = (start, end) => {
                 if (end <= start) return;
                 const t0 = points[start].time;
@@ -1301,15 +1434,10 @@
                 if (!t0 || !t1 || t1 <= t0) return;
                 if (t1 - t0 < STOP_MIN_DURATION_MS) return;
 
-                let latSum = 0, lonSum = 0;
-                for (let j = start; j <= end; j++) {
-                    latSum += points[j].lat;
-                    lonSum += points[j].lon;
-                }
-                const n = end - start + 1;
+                const pos = stopPosition(start, end);
                 stops.push({
-                    lat: latSum / n,
-                    lon: lonSum / n,
+                    lat: pos.lat,
+                    lon: pos.lon,
                     startTime: t0,
                     endTime: t1,
                     durationMs: t1 - t0
@@ -1317,8 +1445,8 @@
             };
 
             for (let i = 1; i < points.length; i++) {
-                const anchor = points[clusterStart];
-                if (haversineDistance(anchor.lat, anchor.lon, points[i].lat, points[i].lon) > STOP_RADIUS_M) {
+                const centroid = clusterCentroid(clusterStart, i - 1);
+                if (haversineDistance(centroid.lat, centroid.lon, points[i].lat, points[i].lon) > STOP_RADIUS_M) {
                     finalizeCluster(clusterStart, i - 1);
                     clusterStart = i;
                 }
@@ -1523,7 +1651,114 @@
             sanitizeElevations(points);
             recomputeEleStats(points, stats);
             const stops = detectStopPoints(points);
-            return { id: Date.now() + Math.random(), name: fileName, points, cumulativeDistances, totalDistance: totalDist, stats, stops };
+            return { id: Date.now() + Math.random(), name: fileName, points, cumulativeDistances, totalDistance: totalDist, stats, stops, thumbnail: null };
+        }
+
+        function sampleTrackIndices(count, maxSamples) {
+            if (count <= maxSamples) {
+                return Array.from({ length: count }, (_, i) => i);
+            }
+            const indices = [];
+            const step = (count - 1) / (maxSamples - 1);
+            for (let s = 0; s < maxSamples; s++) {
+                indices.push(Math.min(count - 1, Math.round(s * step)));
+            }
+            return indices;
+        }
+
+        function getThumbCanvas() {
+            if (!thumbCanvas) {
+                thumbCanvas = document.createElement('canvas');
+                thumbCanvas.width = THUMB_WIDTH;
+                thumbCanvas.height = THUMB_HEIGHT;
+            }
+            return thumbCanvas;
+        }
+
+        function generateTrackThumbnail(points) {
+            if (points.length < 2) return null;
+
+            const indices = sampleTrackIndices(points.length, THUMB_MAX_SAMPLES);
+            let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+            for (const i of indices) {
+                const p = points[i];
+                if (p.lat < minLat) minLat = p.lat;
+                if (p.lat > maxLat) maxLat = p.lat;
+                if (p.lon < minLon) minLon = p.lon;
+                if (p.lon > maxLon) maxLon = p.lon;
+            }
+
+            const latRange = maxLat - minLat || 1e-6;
+            const lonRange = maxLon - minLon || 1e-6;
+            const innerW = THUMB_WIDTH - THUMB_PAD * 2;
+            const innerH = THUMB_HEIGHT - THUMB_PAD * 2;
+            const scale = Math.min(innerW / lonRange, innerH / latRange);
+            const drawW = lonRange * scale;
+            const drawH = latRange * scale;
+            const offsetX = THUMB_PAD + (innerW - drawW) / 2;
+            const offsetY = THUMB_PAD + (innerH - drawH) / 2;
+
+            const canvas = getThumbCanvas();
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, THUMB_WIDTH, THUMB_HEIGHT);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
+            ctx.fillRect(0, 0, THUMB_WIDTH, THUMB_HEIGHT);
+
+            const toX = (lon) => offsetX + (lon - minLon) * scale;
+            const toY = (lat) => offsetY + (maxLat - lat) * scale;
+
+            ctx.strokeStyle = THUMB_LINE_COLOR;
+            ctx.lineWidth = 1.5;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            indices.forEach((idx, k) => {
+                const x = toX(points[idx].lon);
+                const y = toY(points[idx].lat);
+                if (k === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            const drawDot = (idx, color) => {
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.arc(toX(points[idx].lon), toY(points[idx].lat), 2, 0, Math.PI * 2);
+                ctx.fill();
+            };
+            drawDot(indices[0], '#34C759');
+            drawDot(indices[indices.length - 1], '#FF3B30');
+
+            return canvas.toDataURL('image/jpeg', THUMB_JPEG_QUALITY);
+        }
+
+        function scheduleTrackThumbnail(trackData) {
+            const run = () => {
+                if (!loadedFiles.includes(trackData)) return;
+                trackData.thumbnail = generateTrackThumbnail(trackData.points);
+                updateFileListThumbnail(trackData.id);
+            };
+            if (typeof requestIdleCallback === 'function') {
+                requestIdleCallback(run, { timeout: 2000 });
+            } else {
+                setTimeout(run, 0);
+            }
+        }
+
+        function updateFileListThumbnail(trackId) {
+            const file = loadedFiles.find(f => f.id === trackId);
+            if (!file || !file.thumbnail) return;
+            const el = document.querySelector(`.file-thumb[data-track-id="${trackId}"]`);
+            if (!el) return;
+            el.classList.remove('file-thumb-pending');
+            el.innerHTML = `<img src="${file.thumbnail}" alt="" draggable="false">`;
+        }
+
+        function renderFileThumbHtml(file) {
+            if (file.thumbnail) {
+                return `<div class="file-thumb" data-track-id="${file.id}"><img src="${file.thumbnail}" alt="" draggable="false"></div>`;
+            }
+            return `<div class="file-thumb file-thumb-pending" data-track-id="${file.id}"></div>`;
         }
 
         function renderFileList() {
@@ -1539,9 +1774,12 @@
                 item.className = `file-item ${index === activeFileIndex ? 'active' : ''}`;
                 item.onclick = () => switchToFile(index);
                 item.innerHTML = `
-                <div class="file-info">
-                    <div class="file-name">${file.name}</div>
-                    <div class="file-meta">${(file.totalDistance / 1000).toFixed(2)} km | ${file.points.length} 点</div>
+                ${renderFileThumbHtml(file)}
+                <div class="file-item-body">
+                    <div class="file-info">
+                        <div class="file-name">${file.name}</div>
+                        <div class="file-meta">${(file.totalDistance / 1000).toFixed(2)} km | ${file.points.length} 点</div>
+                    </div>
                 </div>
                 <div class="btn-delete" onclick="removeFile(event, ${index})">×</div>
             `;
@@ -1638,7 +1876,40 @@
             addMarker(stats.maxSpeedIdx, '最快', (stats.maxSpeed * 3.6).toFixed(1), 'km/h', 'm-max-speed');
         }
 
+        function formatDurationMs(ms) {
+            const sec = Math.floor(ms / 1000);
+            const h = Math.floor(sec / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            const s = sec % 60;
+            if (h > 0) return `${h} 小时 ${m} 分钟`;
+            if (m > 0) return s > 0 ? `${m} 分钟 ${s} 秒` : `${m} 分钟`;
+            return `${s} 秒`;
+        }
+
+        function formatStopTime(ts) {
+            if (!ts) return '--';
+            return new Date(ts).toLocaleString('zh-CN', {
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', hour12: false
+            });
+        }
+
+        function stopTooltipHtml(stop, idx) {
+            return `<div class="stop-tooltip-inner">
+                <div class="stop-tooltip-title">停靠点 ${idx + 1}</div>
+                <div class="stop-tooltip-row"><span>停留</span><b>${formatDurationMs(stop.durationMs)}</b></div>
+                <div class="stop-tooltip-row"><span>开始</span><b>${formatStopTime(stop.startTime)}</b></div>
+                <div class="stop-tooltip-row"><span>结束</span><b>${formatStopTime(stop.endTime)}</b></div>
+            </div>`;
+        }
+
+        function closeAllStopTooltips() {
+            stopMarkers.forEach(m => m.closeTooltip());
+            pinnedStopMarker = null;
+        }
+
         function addStopMarkers() {
+            closeAllStopTooltips();
             stopMarkers.forEach(m => map.removeLayer(m));
             stopMarkers = [];
             if (activeFileIndex === -1) return;
@@ -1650,7 +1921,29 @@
                     iconSize: [28, 28],
                     iconAnchor: [14, 14]
                 });
-                stopMarkers.push(L.marker(mapLatLng(stop.lat, stop.lon), { icon, zIndexOffset: 500 }).addTo(map));
+                const marker = L.marker(mapLatLng(stop.lat, stop.lon), { icon, zIndexOffset: 500 })
+                    .bindTooltip(stopTooltipHtml(stop, idx), {
+                        direction: 'top',
+                        offset: [0, -16],
+                        className: 'stop-tooltip',
+                        opacity: 1
+                    })
+                    .addTo(map);
+
+                marker.on('mouseover', function () {
+                    this.openTooltip();
+                });
+                marker.on('mouseout', function () {
+                    if (pinnedStopMarker !== this) this.closeTooltip();
+                });
+                marker.on('click', function (e) {
+                    L.DomEvent.stopPropagation(e);
+                    if (pinnedStopMarker && pinnedStopMarker !== this) pinnedStopMarker.closeTooltip();
+                    pinnedStopMarker = this;
+                    this.openTooltip();
+                });
+
+                stopMarkers.push(marker);
             });
         }
 
