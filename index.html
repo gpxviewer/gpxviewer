@@ -529,6 +529,7 @@
             padding: 8px 12px;
             display: flex;
             align-items: center;
+            gap: 8px;
         }
 
         .btn-side {
@@ -544,6 +545,21 @@
             cursor: pointer;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
             -webkit-tap-highlight-color: transparent;
+        }
+
+        .track-play-btn .track-play-icon {
+            width: 18px;
+            height: 18px;
+        }
+
+        .track-play-btn.playing {
+            background: rgba(0, 122, 255, 0.18);
+            box-shadow: inset 0 0 0 2px rgba(0, 122, 255, 0.45);
+        }
+
+        .track-play-btn:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
         }
 
         .segmented-control {
@@ -830,20 +846,28 @@
             font-size: 12px;
             z-index: 1000;
             display: none;
-            min-width: 200px;
+            width: max-content;
+            max-width: min(92vw, 360px);
+        }
+
+        .info-grid,
+        .info-delta {
+            display: grid;
+            grid-template-columns: max-content max-content;
+            column-gap: 0.35em;
+            row-gap: 4px;
+            align-items: baseline;
+        }
+
+        .info-grid .info-label,
+        .info-delta-label {
+            color: #888;
         }
 
         .info-delta {
             margin-top: 8px;
             padding-top: 8px;
             border-top: 1px solid rgba(0, 0, 0, 0.08);
-            display: grid;
-            grid-template-columns: 1fr 1.5fr;
-            gap: 4px;
-        }
-
-        .info-delta-label {
-            color: #888;
         }
 
         .info-delta-up {
@@ -967,6 +991,11 @@
                 </div>
                 <div class="controls-row controls-bottom-row">
             <div class="panel-glass" style="flex-grow: 1; padding: 6px 10px;">
+                <button class="btn-side track-play-btn" id="track-play" style="width:36px; height:36px; background:rgba(0,0,0,0.05); color:#007AFF; box-shadow:none;" title="播放轨迹" disabled>
+                    <svg class="track-play-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                        <polygon points="8,5 19,12 8,19"></polygon>
+                    </svg>
+                </button>
                 <button class="btn-side" id="step-minus" style="width:36px; height:36px; background:rgba(0,0,0,0.05); color:#007AFF; box-shadow:none;">−</button>
                 <div class="segmented-control">
                     <button class="segment-btn" data-val="1">1m</button>
@@ -1022,6 +1051,11 @@
         let mapProgrammaticMove = false;
         let currentStepValue = 100;
         let holdTimer = null, holdInterval = null;
+        let trackPlaying = false;
+        let playDelayTimer = null;
+        let playInterval = null;
+        const PLAY_HOLD_DELAY_MS = 400;
+        const PLAY_STEP_INTERVAL_MS = 80;
         let navLat = 0, navLon = 0;
         let navCoordSys = 'gcj02'; // 导航坐标系默认：'wgs84' | 'gcj02' | 'bd09'
         let currentMapProvider = 'osm'; // 默认底图，可选值见 MAP_PROVIDERS
@@ -1345,10 +1379,12 @@
 
             setupHoldableButton('step-plus', () => moveByDistance(1));
             setupHoldableButton('step-minus', () => moveByDistance(-1));
+            document.getElementById('track-play').addEventListener('click', toggleTrackPlay);
 
             const slider = document.getElementById('progress-slider');
             slider.addEventListener('input', (e) => {
                 if (activeFileIndex === -1) return;
+                stopTrackPlay();
                 exitMapCenterLock();
                 invalidateMapViewBtnSequence();
                 const dist = (e.target.value / 1000) * loadedFiles[activeFileIndex].totalDistance;
@@ -1622,6 +1658,7 @@
 
         function handleChartClick(e) {
             if (activeFileIndex === -1 || currentMode === 0) return;
+            stopTrackPlay();
             exitMapCenterLock();
             invalidateMapViewBtnSequence();
             const canvas = document.getElementById('track-chart');
@@ -2090,6 +2127,7 @@
             if (index < 0 || index >= loadedFiles.length) return;
             activeFileIndex = index;
             document.getElementById('progress-slider').disabled = false;
+            document.getElementById('track-play').disabled = false;
             renderTrack();
             addStatsMarkers();
             addStopMarkers();
@@ -2125,6 +2163,8 @@
             hidePrevIndicatorMarker();
             document.getElementById('info-overlay').style.display = 'none';
             document.getElementById('progress-slider').disabled = true;
+            document.getElementById('track-play').disabled = true;
+            stopTrackPlay();
             prevCurrentPoint = null;
             chartSegmentRange = null;
             updateTrackNavVisibility();
@@ -2165,7 +2205,7 @@
                     html: `<div class="comic-marker ${cls}"><div class="comic-bubble">${label}: ${val}${unit}</div><div class="comic-arrow"></div></div>`,
                     iconSize: [80, 40], iconAnchor: [40, 36]
                 });
-                statsMarkers.push(L.marker(mapLatLng(p.lat, p.lon), { icon }).addTo(map));
+                statsMarkers.push(L.marker(mapLatLng(p.lat, p.lon), { icon, zIndexOffset: 600 }).addTo(map));
             };
             addMarker(stats.maxEleIdx, '最高', stats.maxEle.toFixed(0), 'm', 'm-max-ele');
             addMarker(stats.minEleIdx, '最低', stats.minEle.toFixed(0), 'm', 'm-min-ele');
@@ -2524,12 +2564,12 @@
                 : '--';
             overlay.innerHTML = `
             <div style="font-weight:800; color:#007AFF; margin-bottom:8px; border-bottom:1px solid rgba(0,0,0,0.08); padding-bottom:4px; overflow:hidden; text-overflow:ellipsis;">${file.name}</div>
-            <div style="display:grid; grid-template-columns:1fr 1.5fr; gap:4px;">
-                <span style="color:#888">实时时间:</span> <b>${timeStr}</b>
-                <span style="color:#888">当前速度:</span> <b>${(cur.speed * 3.6).toFixed(1)} <small>km/h</small></b>
-                <span style="color:#888">当前海拔:</span> <b>${cur.ele.toFixed(1)} <small>m</small></b>
-                <span style="color:#888">累计距离:</span> <b>${(targetDist / 1000).toFixed(2)} <small>km</small></b>
-                <span style="color:#888">经纬度:</span>
+            <div class="info-grid">
+                <span class="info-label">实时时间:</span><b>${timeStr}</b>
+                <span class="info-label">当前速度:</span><b>${(cur.speed * 3.6).toFixed(1)} <small>km/h</small></b>
+                <span class="info-label">当前海拔:</span><b>${cur.ele.toFixed(1)} <small>m</small></b>
+                <span class="info-label">累计距离:</span><b>${(targetDist / 1000).toFixed(2)} <small>km</small></b>
+                <span class="info-label">经纬度:</span>
                 <span class="nav-coords" onclick="openNavSheet(${latFull}, ${lonFull})" title="导航到该地点">
                     <b>${latDisplay}, ${lonDisplay}</b>${NAV_ICON_SVG}
                 </span>
@@ -2652,6 +2692,7 @@
                 if (sqDist < minSqDist) { minSqDist = sqDist; nearestIdx = i; }
             }
             updateByDistance(file.cumulativeDistances[nearestIdx]);
+            stopTrackPlay();
             exitMapCenterLock();
             invalidateMapViewBtnSequence();
         }
@@ -2748,8 +2789,67 @@
 
         function moveByDistance(direction) {
             if (activeFileIndex === -1) return;
+            if (direction < 0) stopTrackPlay();
             invalidateMapViewBtnSequence();
             updateByDistance(currentDistanceValue + (direction * currentStepValue));
+            if (direction > 0 && trackPlaying && isAtTrackEnd()) {
+                stopTrackPlay();
+            }
+        }
+
+        function isAtTrackEnd() {
+            if (activeFileIndex === -1) return true;
+            return currentDistanceValue >= loadedFiles[activeFileIndex].totalDistance - 0.01;
+        }
+
+        function updatePlayButtonUI() {
+            const btn = document.getElementById('track-play');
+            if (!btn) return;
+            btn.classList.toggle('playing', trackPlaying);
+            btn.title = trackPlaying ? '暂停播放' : '播放轨迹';
+            btn.innerHTML = trackPlaying
+                ? `<svg class="track-play-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                        <rect x="6" y="5" width="4" height="14" rx="1"></rect>
+                        <rect x="14" y="5" width="4" height="14" rx="1"></rect>
+                   </svg>`
+                : `<svg class="track-play-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                        <polygon points="8,5 19,12 8,19"></polygon>
+                   </svg>`;
+        }
+
+        function stopTrackPlay() {
+            if (!trackPlaying && !playInterval && !playDelayTimer) return;
+            trackPlaying = false;
+            clearTimeout(playDelayTimer);
+            clearInterval(playInterval);
+            playDelayTimer = null;
+            playInterval = null;
+            updatePlayButtonUI();
+        }
+
+        function startTrackPlay() {
+            if (activeFileIndex === -1 || isAtTrackEnd()) return;
+            trackPlaying = true;
+            updatePlayButtonUI();
+            moveByDistance(1);
+            if (!trackPlaying) return;
+            playDelayTimer = setTimeout(() => {
+                playDelayTimer = null;
+                if (!trackPlaying) return;
+                playInterval = setInterval(() => {
+                    if (activeFileIndex === -1 || isAtTrackEnd()) {
+                        stopTrackPlay();
+                        return;
+                    }
+                    moveByDistance(1);
+                }, PLAY_STEP_INTERVAL_MS);
+            }, PLAY_HOLD_DELAY_MS);
+        }
+
+        function toggleTrackPlay() {
+            if (activeFileIndex === -1) return;
+            if (trackPlaying) stopTrackPlay();
+            else startTrackPlay();
         }
 
         function setupHoldableButton(id, action) {
