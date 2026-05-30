@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root {
-            --primary-bg: rgba(255, 255, 255, 0.65);
+            --primary-bg: rgba(255, 255, 255, 0.42);
             --accent-color: #007AFF;
             --danger-color: #FF3B30;
             --panel-width: 300px;
@@ -38,6 +38,20 @@
             top: 20px;
             right: 20px;
             z-index: 1050;
+        }
+
+        #track-nav {
+            position: absolute;
+            top: 78px;
+            right: 20px;
+            z-index: 1050;
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        #track-nav.visible {
+            display: flex;
         }
 
         /* 侧边列表面板 */
@@ -92,7 +106,7 @@
         }
 
         .file-item.active {
-            background: white;
+            background: rgba(255, 255, 255, 0.55);
             border-color: var(--accent-color);
             box-shadow: 0 4px 12px rgba(0, 122, 255, 0.15);
         }
@@ -279,21 +293,43 @@
         }
 
         .segment-btn.active {
-            background: white;
+            background: rgba(255, 255, 255, 0.7);
             color: var(--accent-color);
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .copy-coords {
+            cursor: pointer;
+            border-radius: 6px;
+            padding: 1px 4px;
+            transition: background 0.15s;
+        }
+
+        .copy-coords:hover {
+            background: rgba(0, 122, 255, 0.12);
+        }
+
+        .copy-coords:active {
+            background: rgba(0, 122, 255, 0.22);
+        }
+
+        .slider-row {
+            flex-grow: 1;
+            pointer-events: auto;
         }
 
         #progress-slider {
             width: 100%;
             height: 36px;
             -webkit-appearance: none;
+            appearance: none;
             background: transparent;
+            margin: 0;
         }
 
         #progress-slider::-webkit-slider-runnable-track {
             height: 6px;
-            background: rgba(0, 0, 0, 0.1);
+            background: rgba(0, 0, 0, 0.15);
             border-radius: 3px;
         }
 
@@ -303,9 +339,25 @@
             width: 26px;
             border-radius: 50%;
             background: var(--accent-color);
-            border: 3px solid white;
+            border: none;
             margin-top: -10px;
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+        }
+
+        #progress-slider::-moz-range-track {
+            height: 6px;
+            background: rgba(0, 0, 0, 0.15);
+            border-radius: 3px;
+            border: none;
+        }
+
+        #progress-slider::-moz-range-thumb {
+            height: 26px;
+            width: 26px;
+            border-radius: 50%;
+            background: var(--accent-color);
+            border: none;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
         }
 
         #info-overlay {
@@ -313,15 +365,11 @@
             top: 20px;
             left: 20px;
             background: var(--primary-bg);
-            backdrop-filter: blur(15px);
-            -webkit-backdrop-filter: blur(15px);
             padding: 16px;
             border-radius: 18px;
             font-size: 12px;
             z-index: 1000;
             display: none;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.4);
             min-width: 160px;
         }
 
@@ -355,6 +403,19 @@
         </svg>
     </button>
 
+    <div id="track-nav">
+        <button id="track-prev" class="btn-side" title="上一个轨迹" onclick="navigateTrack(-1)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;">
+                <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+        </button>
+        <button id="track-next" class="btn-side" title="下一个轨迹" onclick="navigateTrack(1)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;">
+                <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+        </button>
+    </div>
+
     <div id="file-panel">
         <div class="panel-header">
             <span>轨迹列表</span>
@@ -377,10 +438,8 @@
     <div id="toast">提示信息</div>
 
     <div id="controls-wrapper">
-        <div class="controls-row">
-            <div class="panel-glass" style="flex-grow: 1;">
-                <input type="range" id="progress-slider" min="0" max="1000" value="0" disabled>
-            </div>
+        <div class="controls-row slider-row">
+            <input type="range" id="progress-slider" min="0" max="1000" value="0" disabled>
         </div>
 
         <div class="controls-row">
@@ -537,6 +596,7 @@
             const list = document.getElementById('file-list');
             if (loadedFiles.length === 0) {
                 list.innerHTML = `<div style="text-align: center; padding: 60px 20px; color: #888; font-size: 13px;">还没有导入任何轨迹</div>`;
+                updateTrackNavVisibility();
                 return;
             }
             list.innerHTML = '';
@@ -553,9 +613,21 @@
             `;
                 list.appendChild(item);
             });
+            updateTrackNavVisibility();
         }
 
-        function switchToFile(index) {
+        function updateTrackNavVisibility() {
+            const nav = document.getElementById('track-nav');
+            nav.classList.toggle('visible', loadedFiles.length > 1 && activeFileIndex !== -1);
+        }
+
+        function navigateTrack(delta) {
+            if (loadedFiles.length <= 1 || activeFileIndex === -1) return;
+            const newIndex = (activeFileIndex + delta + loadedFiles.length) % loadedFiles.length;
+            switchToFile(newIndex, false);
+        }
+
+        function switchToFile(index, closePanel = true) {
             if (index < 0 || index >= loadedFiles.length) return;
             activeFileIndex = index;
             document.getElementById('progress-slider').disabled = false;
@@ -564,7 +636,7 @@
             resetMapView();
             updateByDistance(0);
             renderFileList();
-            togglePanel(false);
+            if (closePanel) togglePanel(false);
         }
 
         function removeFile(event, index) {
@@ -584,6 +656,7 @@
             if (map.hasLayer(indicatorMarker)) map.removeLayer(indicatorMarker);
             document.getElementById('info-overlay').style.display = 'none';
             document.getElementById('progress-slider').disabled = true;
+            updateTrackNavVisibility();
         }
 
         function renderTrack() {
@@ -654,15 +727,46 @@
 
             const overlay = document.getElementById('info-overlay');
             overlay.style.display = 'block';
+            const latFull = cur.lat;
+            const lonFull = cur.lon;
+            const latDisplay = cur.lat.toFixed(2);
+            const lonDisplay = cur.lon.toFixed(2);
+            const timeStr = cur.time
+                ? new Date(cur.time).toLocaleString('zh-CN', {
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+                })
+                : '--';
             overlay.innerHTML = `
-            <div style="font-weight:800; color:#007AFF; margin-bottom:8px; border-bottom:1px solid #eee; padding-bottom:4px; overflow:hidden; text-overflow:ellipsis;">${file.name}</div>
+            <div style="font-weight:800; color:#007AFF; margin-bottom:8px; border-bottom:1px solid rgba(0,0,0,0.08); padding-bottom:4px; overflow:hidden; text-overflow:ellipsis;">${file.name}</div>
             <div style="display:grid; grid-template-columns:1fr 1.5fr; gap:4px;">
-                <span style="color:#888">实时时间:</span> <b>${new Date(cur.time).toLocaleTimeString('zh-CN', { hour12: false })}</b>
+                <span style="color:#888">实时时间:</span> <b>${timeStr}</b>
                 <span style="color:#888">当前速度:</span> <b>${(cur.speed * 3.6).toFixed(1)} <small>km/h</small></b>
                 <span style="color:#888">当前海拔:</span> <b>${cur.ele.toFixed(1)} <small>m</small></b>
                 <span style="color:#888">累计距离:</span> <b>${(targetDist / 1000).toFixed(2)} <small>km</small></b>
+                <span style="color:#888">经纬度:</span>
+                <span class="copy-coords" onclick="copyCoords(${latFull}, ${lonFull})" title="点击复制完整坐标">
+                    <b>${latDisplay}, ${lonDisplay}</b>
+                </span>
             </div>
         `;
+        }
+
+        function copyCoords(lat, lon) {
+            const text = `${Number(lat).toFixed(6)}, ${Number(lon).toFixed(6)}`;
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('坐标已复制到剪贴板');
+            }).catch(() => {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showToast('坐标已复制到剪贴板');
+            });
         }
 
         function findNearestTrackPoint(clickedLatLng) {
