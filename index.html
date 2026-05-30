@@ -729,6 +729,9 @@
         const CHART_ELEVATION_GRID_COLOR = 'rgba(60, 60, 67, 0.55)';
         const CHART_ELEVATION_GRID_DASH = [5, 5];
 
+        const SPEED_MIN_DT_SEC = 1.0;
+        const SPEED_MAX_MS = 45;
+
         const NAV_CRS_ORDER = ['wgs84', 'gcj02', 'bd09'];
         const NAV_CRS_LABELS = { wgs84: 'WGS-84', gcj02: 'GCJ-02', bd09: 'BD-09' };
 
@@ -838,7 +841,7 @@
         };
 
         function getChartValue(point, mode) {
-            if (mode === 1) return Math.min(point.speed, 40) * 3.6;
+            if (mode === 1) return point.speed * 3.6;
             return point.ele;
         }
 
@@ -1007,6 +1010,103 @@
             evt.target.value = '';
         }
 
+        function haversineDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371000;
+            const toRad = (d) => d * Math.PI / 180;
+            const dLat = toRad(lat2 - lat1);
+            const dLon = toRad(lon2 - lon1);
+            const a = Math.sin(dLat / 2) ** 2
+                + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        }
+
+        function parseTrkptSpeed(pt) {
+            for (let i = 0; i < pt.children.length; i++) {
+                const child = pt.children[i];
+                if (child.localName && child.localName.toLowerCase() === 'speed') {
+                    const v = parseFloat(child.textContent);
+                    if (!isNaN(v) && v >= 0) return v;
+                }
+            }
+            const speedEl = pt.getElementsByTagName('speed')[0];
+            if (speedEl) {
+                const v = parseFloat(speedEl.textContent);
+                if (!isNaN(v) && v >= 0) return v;
+            }
+            return null;
+        }
+
+        function parseMetadataMaxSpeed(xmlDoc) {
+            const meta = xmlDoc.getElementsByTagName('metadata')[0];
+            if (!meta) return null;
+            for (let i = 0; i < meta.children.length; i++) {
+                const child = meta.children[i];
+                if (child.localName && child.localName.toLowerCase() === 'maxspeed') {
+                    const v = parseFloat(child.textContent);
+                    if (!isNaN(v) && v >= 0) return v;
+                }
+            }
+            return null;
+        }
+
+        function detectTrkptSpeedUnit(xmlDoc, raw) {
+            const trkptSpeeds = raw.map(r => r.gpxSpeed).filter(v => v != null);
+            if (trkptSpeeds.length === 0) return 'ms';
+
+            const maxTrkpt = Math.max(...trkptSpeeds);
+            const metaMax = parseMetadataMaxSpeed(xmlDoc);
+
+            // metadata maxspeed 通常为 m/s；若 trkpt 数值明显更大，则 trkpt 为 km/h
+            if (metaMax != null && metaMax > 0 && maxTrkpt > metaMax * 2) {
+                return 'kmh';
+            }
+            if (maxTrkpt > 25) return 'kmh';
+            return 'ms';
+        }
+
+        function gpxSpeedToMs(value, unit) {
+            return unit === 'kmh' ? value / 3.6 : value;
+        }
+
+        function computeTrackSpeeds(raw, speedUnit) {
+            const speeds = new Array(raw.length).fill(0);
+            const minDtMs = SPEED_MIN_DT_SEC * 1000;
+
+            for (let i = 0; i < raw.length; i++) {
+                if (raw[i].gpxSpeed != null) {
+                    speeds[i] = Math.min(gpxSpeedToMs(raw[i].gpxSpeed, speedUnit), SPEED_MAX_MS);
+                    continue;
+                }
+                if (raw[i].time <= 0) {
+                    speeds[i] = i > 0 ? speeds[i - 1] : 0;
+                    continue;
+                }
+
+                let j = i - 1;
+                while (j > 0 && raw[j].time > 0 && (raw[i].time - raw[j].time) < minDtMs) {
+                    j--;
+                }
+
+                if (j < 0 || raw[j].time <= 0 || raw[i].time <= raw[j].time) {
+                    speeds[i] = i > 0 ? speeds[i - 1] : 0;
+                    continue;
+                }
+
+                let dist = 0;
+                for (let k = j + 1; k <= i; k++) {
+                    dist += haversineDistance(raw[k - 1].lat, raw[k - 1].lon, raw[k].lat, raw[k].lon);
+                }
+
+                const dt = (raw[i].time - raw[j].time) / 1000;
+                let s = dist / dt;
+                if (s > SPEED_MAX_MS) {
+                    s = i > 0 ? speeds[i - 1] : 0;
+                }
+                speeds[i] = s;
+            }
+            return speeds;
+        }
+
         function parseGPXData(xmlText, fileName) {
             const parser = new DOMParser();
             const xmlDoc = parser.parseFromString(xmlText, "text/xml");
@@ -1026,22 +1126,24 @@
                 const ele = pt.getElementsByTagName("ele")[0] ? parseFloat(pt.getElementsByTagName("ele")[0].textContent) : 0;
                 const timeStr = pt.getElementsByTagName("time")[0] ? pt.getElementsByTagName("time")[0].textContent : null;
                 const time = timeStr ? new Date(timeStr).getTime() : 0;
-                raw.push({ lat, lon, ele, time });
+                const gpxSpeed = parseTrkptSpeed(pt);
+                raw.push({ lat, lon, ele, time, gpxSpeed });
             }
+
+            const speedUnit = detectTrkptSpeedUnit(xmlDoc, raw);
+            const speeds = computeTrackSpeeds(raw, speedUnit);
 
             for (let i = 0; i < raw.length; i++) {
                 const cur = raw[i];
+                cur.speed = speeds[i];
                 if (cur.ele > stats.maxEle) { stats.maxEle = cur.ele; stats.maxEleIdx = i; }
                 if (cur.ele < stats.minEle) { stats.minEle = cur.ele; stats.minEleIdx = i; }
+                if (cur.speed > stats.maxSpeed) { stats.maxSpeed = cur.speed; stats.maxSpeedIdx = i; }
                 if (i > 0) {
-                    const d = map.distance([raw[i - 1].lat, raw[i - 1].lon], [cur.lat, cur.lon]);
+                    const d = haversineDistance(raw[i - 1].lat, raw[i - 1].lon, cur.lat, cur.lon);
                     totalDist += d;
                     cumulativeDistances.push(totalDist);
-                    const dt = (cur.time - raw[i - 1].time) / 1000;
-                    let s = dt > 0.1 ? d / dt : 0;
-                    cur.speed = s;
-                    if (s > stats.maxSpeed && s < 45) { stats.maxSpeed = s; stats.maxSpeedIdx = i; }
-                } else { cur.speed = 0; }
+                }
                 points.push(cur);
             }
             return { id: Date.now() + Math.random(), name: fileName, points, cumulativeDistances, totalDistance: totalDist, stats };
@@ -1125,7 +1227,7 @@
             if (currentMode === 0) {
                 polylines.push(L.polyline(pts.map(p => [p.lat, p.lon]), { color: '#007AFF', weight: 5, opacity: 0.7 }).addTo(map));
             } else {
-                const values = currentMode === 1 ? pts.map(p => Math.min(p.speed, 40)) : pts.map(p => p.ele);
+                const values = currentMode === 1 ? pts.map(p => p.speed) : pts.map(p => p.ele);
                 const min = Math.min(...values), max = Math.max(...values);
                 for (let i = 1; i < pts.length; i++) {
                     const ratio = (values[i] - min) / (max - min || 1);
