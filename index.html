@@ -878,6 +878,133 @@
             color: #FF9500;
         }
 
+        .info-stat-link {
+            cursor: pointer;
+            border-radius: 6px;
+            padding: 1px 4px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: background 0.15s;
+            color: inherit;
+        }
+
+        .info-stat-link:hover {
+            background: rgba(0, 122, 255, 0.12);
+        }
+
+        .info-stat-link:active {
+            background: rgba(0, 122, 255, 0.22);
+        }
+
+        .info-stat-icon {
+            width: 14px;
+            height: 14px;
+            color: var(--accent-color);
+            flex-shrink: 0;
+        }
+
+        #stats-modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.45);
+            z-index: 3500;
+            display: none;
+            opacity: 0;
+            transition: opacity 0.28s;
+        }
+
+        #stats-modal-overlay.open {
+            opacity: 1;
+        }
+
+        #stats-modal {
+            position: fixed;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%) scale(0.92);
+            z-index: 3501;
+            width: min(92vw, 520px);
+            max-height: min(88vh, 480px);
+            background: rgba(255, 255, 255, 0.97);
+            border-radius: 18px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22);
+            padding: 16px 16px 14px;
+            display: none;
+            flex-direction: column;
+            opacity: 0;
+            transition: opacity 0.28s, transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+            pointer-events: auto;
+            overflow: hidden;
+        }
+
+        #stats-modal.open {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+
+        .stats-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
+        .stats-modal-title {
+            font-size: 16px;
+            font-weight: 800;
+            color: #222;
+        }
+
+        .stats-modal-close {
+            border: none;
+            background: rgba(0, 0, 0, 0.06);
+            color: #666;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            font-size: 18px;
+            line-height: 1;
+            cursor: pointer;
+        }
+
+        #stats-hist-wrap {
+            flex: 0 0 auto;
+            width: 100%;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        #stats-hist-canvas {
+            display: block;
+            cursor: crosshair;
+        }
+
+        .stats-hist-tooltip {
+            position: fixed;
+            z-index: 3600;
+            pointer-events: none;
+            display: none;
+            background: rgba(28, 28, 30, 0.92);
+            color: #fff;
+            padding: 6px 10px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+            transform: translate(-50%, calc(-100% - 8px));
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .stats-modal-foot {
+            flex-shrink: 0;
+            margin-top: 0;
+            font-size: 11px;
+            color: #888;
+            text-align: center;
+            line-height: 1.45;
+        }
+
         #toast {
             position: fixed;
             top: 10%;
@@ -941,6 +1068,19 @@
 
     <div id="info-overlay"></div>
     <div id="toast">提示信息</div>
+
+    <div id="stats-modal-overlay" onclick="closeStatsModal()"></div>
+    <div id="stats-modal" onclick="event.stopPropagation()">
+        <div class="stats-modal-header">
+            <div class="stats-modal-title" id="stats-modal-title">统计</div>
+            <button type="button" class="stats-modal-close" onclick="closeStatsModal()" aria-label="关闭">×</button>
+        </div>
+        <div id="stats-hist-tooltip" class="stats-hist-tooltip"></div>
+        <div id="stats-hist-wrap">
+            <canvas id="stats-hist-canvas"></canvas>
+        </div>
+        <div class="stats-modal-foot" id="stats-modal-foot"></div>
+    </div>
 
     <div id="nav-sheet-overlay" onclick="closeNavSheet()"></div>
     <div id="nav-sheet" onclick="event.stopPropagation()">
@@ -1056,6 +1196,9 @@
         let playInterval = null;
         const PLAY_HOLD_DELAY_MS = 400;
         const PLAY_STEP_INTERVAL_MS = 80;
+        let statsHistHitAreas = [];
+        let statsHistMeta = null;
+        let statsHistTooltipPinned = false;
         let navLat = 0, navLon = 0;
         let navCoordSys = 'gcj02'; // 导航坐标系默认：'wgs84' | 'gcj02' | 'bd09'
         let currentMapProvider = 'osm'; // 默认底图，可选值见 MAP_PROVIDERS
@@ -1158,7 +1301,7 @@
 
         // 停靠点：在半径内连续停留达到最小时长才标记；位置按停留时长加权（非简单算术平均）
         const STOP_RADIUS_M = 1000;              // 判定为「同一地点」的最大半径（米，相对区间质心）
-        const STOP_MIN_DURATION_MS = 3600 * 1000; // 最短停留时长（毫秒），默认 1 小时
+        const STOP_MIN_DURATION_MS = 1800 * 1000; // 最短停留时长（毫秒），默认 1 小时
 
         // 海拔清洗：过滤气压计/GPS 异常跳变，异常段用前后有效值线性插值
         const ELE_MIN = 0;                  // 合理海拔下限（米）；死海等场景可改为负数如 -500
@@ -1174,11 +1317,20 @@
         const MILESTONE_MAX_IN_VIEW = 8;     // 视口内里程牌数量上限（防过密）
         const MILESTONE_MIN_IN_VIEW = 3;      // 视口内期望至少可见块数（防过疏）
 
+        // ── 速度 / 海拔里程柱状图（点击信息面板「当前速度」「当前海拔」打开）──
+        // 算法：在下方步进列表中，选取「柱数 ≤ HIST_MAX_BINS」且柱数尽量多的一种步进。
+        // 例：海拔 0～500 m 时，步进 50 → 10 根柱；步进 100 → 5 根柱（较粗）。
+        const HIST_MAX_BINS = 15;                              // 柱子数量上限（横轴最多分几段）
+        const SPEED_HIST_STEPS = [1, 5, 10];                   // 速度步进候选（km/h），按数组顺序尝试
+        const ELE_HIST_STEPS = [1, 5, 10, 50, 100, 200, 400];       // 海拔步进候选（m），改此数组即可调整海拔粒度
+
         // 导航面板坐标系选项（顺序与显示名称）
         const NAV_CRS_ORDER = ['wgs84', 'gcj02', 'bd09'];
         const NAV_CRS_LABELS = { wgs84: 'WGS-84', gcj02: 'GCJ-02', bd09: 'BD-09' };
 
         const NAV_ICON_SVG = `<svg class="nav-coords-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"></polygon></svg>`;
+
+        const STAT_CHART_ICON_SVG = `<svg class="info-stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="20" x2="4" y2="14"></line><line x1="10" y1="20" x2="10" y2="9"></line><line x1="16" y1="20" x2="16" y2="12"></line><line x1="22" y1="20" x2="22" y2="5"></line></svg>`;
 
         const CoordTransform = (() => {
             const PI = Math.PI;
@@ -1392,6 +1544,7 @@
             });
 
             document.getElementById('track-chart').addEventListener('click', handleChartClick);
+            setupStatsHistInteraction();
             window.addEventListener('resize', () => {
                 clearTimeout(window.chartResizeTimer);
                 window.chartResizeTimer = setTimeout(renderTrackChart, 120);
@@ -2566,8 +2719,14 @@
             <div style="font-weight:800; color:#007AFF; margin-bottom:8px; border-bottom:1px solid rgba(0,0,0,0.08); padding-bottom:4px; overflow:hidden; text-overflow:ellipsis;">${file.name}</div>
             <div class="info-grid">
                 <span class="info-label">实时时间:</span><b>${timeStr}</b>
-                <span class="info-label">当前速度:</span><b>${(cur.speed * 3.6).toFixed(1)} <small>km/h</small></b>
-                <span class="info-label">当前海拔:</span><b>${cur.ele.toFixed(1)} <small>m</small></b>
+                <span class="info-label">当前速度:</span>
+                <span class="info-stat-link" onclick="openStatsModal('speed')" title="查看各速度行驶里程分布">
+                    <b>${(cur.speed * 3.6).toFixed(1)} <small>km/h</small></b>${STAT_CHART_ICON_SVG}
+                </span>
+                <span class="info-label">当前海拔:</span>
+                <span class="info-stat-link" onclick="openStatsModal('elevation')" title="查看各海拔行驶里程分布">
+                    <b>${cur.ele.toFixed(1)} <small>m</small></b>${STAT_CHART_ICON_SVG}
+                </span>
                 <span class="info-label">累计距离:</span><b>${(targetDist / 1000).toFixed(2)} <small>km</small></b>
                 <span class="info-label">经纬度:</span>
                 <span class="nav-coords" onclick="openNavSheet(${latFull}, ${lonFull})" title="导航到该地点">
@@ -2620,6 +2779,282 @@
             setTimeout(() => {
                 if (!sheet.classList.contains('open')) overlay.style.display = 'none';
             }, 350);
+        }
+
+        function pickHistConfig(min, max, steps) {
+            let best = null;
+            for (const step of steps) {
+                const lo = Math.floor(min / step) * step;
+                let hi = Math.ceil(max / step) * step;
+                if (hi <= lo) hi = lo + step;
+                const numBins = Math.round((hi - lo) / step);
+                if (numBins >= 1 && numBins <= HIST_MAX_BINS) {
+                    if (!best || numBins > best.numBins) {
+                        best = { step, lo, hi, numBins };
+                    }
+                }
+            }
+            if (best) return best;
+            const step = steps[steps.length - 1];
+            const lo = Math.floor(min / step) * step;
+            const numBins = HIST_MAX_BINS;
+            const hi = lo + numBins * step;
+            return { step, lo, hi, numBins };
+        }
+
+        function buildDistanceHistogram(values, cumulativeDistances, kind) {
+            if (values.length < 2) return null;
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            const steps = kind === 'speed' ? SPEED_HIST_STEPS : ELE_HIST_STEPS;
+            const { step, lo, hi, numBins } = pickHistConfig(min, max, steps);
+            const bins = new Array(numBins).fill(0);
+
+            for (let i = 1; i < values.length; i++) {
+                const dist = cumulativeDistances[i] - cumulativeDistances[i - 1];
+                if (dist <= 0) continue;
+                const val = (values[i - 1] + values[i]) / 2;
+                let idx = Math.floor((val - lo) / step);
+                if (idx >= numBins) idx = numBins - 1;
+                if (idx < 0) idx = 0;
+                bins[idx] += dist;
+            }
+
+            const labels = [];
+            for (let b = 0; b < numBins; b++) {
+                labels.push({ lo: lo + b * step, hi: lo + (b + 1) * step });
+            }
+            return { bins, labels, min: lo, max: hi, step, totalDist: cumulativeDistances[cumulativeDistances.length - 1] };
+        }
+
+        function computeSpeedHistogram(file) {
+            const speeds = file.points.map(p => p.speed * 3.6);
+            return buildDistanceHistogram(speeds, file.cumulativeDistances, 'speed');
+        }
+
+        function computeElevationHistogram(file) {
+            const elevations = file.points.map(p => p.ele);
+            return buildDistanceHistogram(elevations, file.cumulativeDistances, 'elevation');
+        }
+
+        function formatHistDistance(m) {
+            if (m < 1000) return `${Math.round(m)} m`;
+            return `${(m / 1000).toFixed(2)} km`;
+        }
+
+        function formatHistBinLabel(lo) {
+            return `${Math.round(lo)}`;
+        }
+
+        function hideStatsHistTooltip() {
+            const tooltip = document.getElementById('stats-hist-tooltip');
+            if (!tooltip) return;
+            tooltip.style.display = 'none';
+            statsHistTooltipPinned = false;
+            const modal = document.getElementById('stats-modal');
+            const wrap = document.getElementById('stats-hist-wrap');
+            if (modal && wrap && tooltip.parentElement === document.body) {
+                modal.insertBefore(tooltip, wrap);
+            }
+        }
+
+        function placeStatsHistTooltip(bar) {
+            const canvas = document.getElementById('stats-hist-canvas');
+            const tooltip = document.getElementById('stats-hist-tooltip');
+            if (!statsHistMeta || !canvas || !tooltip) return;
+
+            if (tooltip.parentElement !== document.body) {
+                document.body.appendChild(tooltip);
+            }
+
+            const rect = canvas.getBoundingClientRect();
+            const unit = statsHistMeta.type === 'speed' ? 'km/h' : 'm';
+            const hiLabel = Math.round(bar.hi);
+            tooltip.textContent = `${Math.round(bar.lo)}–${hiLabel} ${unit}：${formatHistDistance(bar.dist)}`;
+            tooltip.style.position = 'fixed';
+            tooltip.style.left = (rect.left + bar.x + bar.w / 2) + 'px';
+            tooltip.style.top = (rect.top + bar.barTop) + 'px';
+            tooltip.style.transform = rect.top + bar.barTop < 72
+                ? 'translate(-50%, 8px)'
+                : 'translate(-50%, calc(-100% - 8px))';
+            tooltip.style.display = 'block';
+        }
+
+        function setupStatsHistInteraction() {
+            const canvas = document.getElementById('stats-hist-canvas');
+
+            function canvasPoint(e) {
+                const rect = canvas.getBoundingClientRect();
+                const clientX = e.clientX ?? e.changedTouches?.[0]?.clientX;
+                const clientY = e.clientY ?? e.changedTouches?.[0]?.clientY;
+                const scaleX = rect.width / (canvas.offsetWidth || rect.width || 1);
+                const scaleY = rect.height / (canvas.offsetHeight || rect.height || 1);
+                return {
+                    cx: (clientX - rect.left) / (scaleX || 1),
+                    cy: (clientY - rect.top) / (scaleY || 1)
+                };
+            }
+
+            function findBar(cx, cy) {
+                return statsHistHitAreas.find(b =>
+                    cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h
+                );
+            }
+
+            function showBarTooltip(bar, pin) {
+                if (pin) statsHistTooltipPinned = true;
+                placeStatsHistTooltip(bar);
+            }
+
+            canvas.addEventListener('mousemove', (e) => {
+                if (statsHistTooltipPinned) return;
+                const { cx, cy } = canvasPoint(e);
+                const bar = findBar(cx, cy);
+                if (bar) placeStatsHistTooltip(bar);
+                else hideStatsHistTooltip();
+            });
+
+            canvas.addEventListener('mouseleave', () => {
+                if (!statsHistTooltipPinned) hideStatsHistTooltip();
+            });
+
+            canvas.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const { cx, cy } = canvasPoint(e);
+                const bar = findBar(cx, cy);
+                if (bar) showBarTooltip(bar, true);
+                else hideStatsHistTooltip();
+            });
+
+            canvas.addEventListener('touchstart', (e) => {
+                const { cx, cy } = canvasPoint(e);
+                const bar = findBar(cx, cy);
+                if (bar) showBarTooltip(bar, true);
+                else hideStatsHistTooltip();
+            }, { passive: true });
+        }
+
+        function renderStatsHistogram(hist, type) {
+            hideStatsHistTooltip();
+            const canvas = document.getElementById('stats-hist-canvas');
+            const wrap = document.getElementById('stats-hist-wrap');
+            const ctx = canvas.getContext('2d');
+            const n = hist.labels.length;
+            let yMaxM = 1;
+            for (let i = 0; i < n; i++) {
+                const d = hist.bins[i] || 0;
+                if (d > yMaxM) yMaxM = d;
+            }
+
+            const barGap = 4;
+            const chartW = wrap.clientWidth || 320;
+            const chartH = 232;
+            const dpr = window.devicePixelRatio || 1;
+
+            canvas.width = Math.round(chartW * dpr);
+            canvas.height = Math.round(chartH * dpr);
+            canvas.style.width = chartW + 'px';
+            canvas.style.height = chartH + 'px';
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, chartW, chartH);
+
+            ctx.font = '10px -apple-system, sans-serif';
+            const yMaxLabel = formatHistDistance(yMaxM);
+            const yAxisLabelW = Math.max(ctx.measureText(yMaxLabel).width, ctx.measureText('0').width);
+            const pad = { l: Math.max(40, Math.ceil(yAxisLabelW) + 8), r: 12, t: 12, b: 42 };
+            const plotW = chartW - pad.l - pad.r;
+            const barW = Math.max(8, (plotW - barGap * Math.max(n - 1, 0)) / n);
+
+            const plotH = chartH - pad.t - pad.b;
+            const valMin = hist.min;
+            const valMax = hist.max;
+            const valRange = valMax - valMin || 1;
+            const hitAreas = [];
+
+            ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(pad.l, pad.t + plotH);
+            ctx.lineTo(pad.l + plotW, pad.t + plotH);
+            ctx.stroke();
+
+            ctx.fillStyle = '#888';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(yMaxLabel, pad.l - 4, pad.t);
+            ctx.fillText('0', pad.l - 4, pad.t + plotH);
+
+            for (let i = 0; i < n; i++) {
+                const binM = hist.bins[i] || 0;
+                const x = pad.l + i * (barW + barGap);
+                const h = (binM / yMaxM) * plotH;
+                const y = pad.t + plotH - h;
+                const mid = (hist.labels[i].lo + hist.labels[i].hi) / 2;
+                const ratio = (mid - valMin) / valRange;
+                const hue = type === 'speed' ? ratio * 120 : (1 - ratio) * 120;
+                ctx.fillStyle = `hsl(${hue}, 78%, 48%)`;
+                ctx.fillRect(x, y, barW, Math.max(h, binM > 0 ? 2 : 0));
+
+                hitAreas.push({
+                    x, y: pad.t, w: barW, h: plotH,
+                    barTop: y,
+                    dist: binM,
+                    lo: hist.labels[i].lo,
+                    hi: hist.labels[i].hi
+                });
+
+                ctx.fillStyle = '#555';
+                ctx.font = n > 12 ? '8px -apple-system, sans-serif' : '9px -apple-system, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                ctx.fillText(formatHistBinLabel(hist.labels[i].lo), x + barW / 2, pad.t + plotH + 5);
+            }
+
+            statsHistHitAreas = hitAreas;
+            statsHistMeta = { type };
+
+            const unit = type === 'speed' ? 'km/h' : 'm';
+            document.getElementById('stats-modal-foot').textContent =
+                `纵轴：各区间累计行驶里程 · 横轴：${type === 'speed' ? '速度' : '海拔'}（${unit}，步进 ${hist.step}，从左到右递增） · 总计 ${formatHistDistance(hist.totalDist)}`;
+        }
+
+        function openStatsModal(type) {
+            if (activeFileIndex === -1) return;
+            const file = loadedFiles[activeFileIndex];
+            const hist = type === 'speed' ? computeSpeedHistogram(file) : computeElevationHistogram(file);
+            if (!hist) {
+                showToast('数据不足，无法生成统计图');
+                return;
+            }
+
+            document.getElementById('stats-modal-title').textContent =
+                type === 'speed' ? '速度里程分布' : '海拔里程分布';
+
+            const overlay = document.getElementById('stats-modal-overlay');
+            const modal = document.getElementById('stats-modal');
+            overlay.style.display = 'block';
+            modal.style.display = 'flex';
+            overlay.classList.add('open');
+            modal.classList.add('open');
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    renderStatsHistogram(hist, type);
+                });
+            });
+        }
+
+        function closeStatsModal() {
+            hideStatsHistTooltip();
+            const overlay = document.getElementById('stats-modal-overlay');
+            const modal = document.getElementById('stats-modal');
+            overlay.classList.remove('open');
+            modal.classList.remove('open');
+            setTimeout(() => {
+                if (!modal.classList.contains('open')) {
+                    overlay.style.display = 'none';
+                    modal.style.display = 'none';
+                }
+            }, 280);
         }
 
         function navAction(type) {
