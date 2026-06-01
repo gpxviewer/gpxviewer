@@ -1455,6 +1455,10 @@
         const SPEED_HIST_STEPS = [1, 5, 10];                   // 速度步进候选（km/h），按数组顺序尝试
         const ELE_HIST_STEPS = [1, 5, 10, 50, 100, 200, 400];       // 海拔步进候选（m），改此数组即可调整海拔粒度
 
+        // 每次打开自动加载的样例 GPX（与 index.html 同目录）
+        const SAMPLE_GPX_PATH = '318川藏线.gpx';
+        const SAMPLE_GPX_NAME = '318川藏线.gpx';
+
         // 导航面板坐标系选项（顺序与显示名称）
         const NAV_CRS_ORDER = ['wgs84', 'gcj02', 'bd09'];
         const NAV_CRS_LABELS = { wgs84: 'WGS-84', gcj02: 'GCJ-02', bd09: 'BD-09' };
@@ -1689,7 +1693,43 @@
                 clearTimeout(window.chartResizeTimer);
                 window.chartResizeTimer = setTimeout(renderTrackChart, 120);
             });
+
+            loadSampleTrack();
         };
+
+        function importTrackData(trackData) {
+            if (!trackData) return false;
+            trackData.thumbnail = null;
+            loadedFiles.push(trackData);
+            scheduleTrackThumbnail(trackData);
+            return true;
+        }
+
+        function finalizeFileImport() {
+            const activeId = activeFileIndex >= 0 ? loadedFiles[activeFileIndex]?.id : null;
+            sortLoadedFiles();
+            if (activeId != null) {
+                const idx = loadedFiles.findIndex(f => f.id === activeId);
+                if (idx >= 0) activeFileIndex = idx;
+            }
+            renderFileList();
+            if (activeFileIndex === -1 && loadedFiles.length > 0) switchToFile(0);
+        }
+
+        async function loadSampleTrack() {
+            try {
+                showToast('正在加载样例轨迹…');
+                const res = await fetch(encodeURI(SAMPLE_GPX_PATH));
+                if (!res.ok) return;
+                const text = await res.text();
+                const trackData = parseGPXData(text, SAMPLE_GPX_NAME);
+                if (!importTrackData(trackData)) return;
+                trackData.isSample = true;
+                finalizeFileImport();
+            } catch (err) {
+                console.warn('样例轨迹加载失败', err);
+            }
+        }
 
         function getChartValue(point, mode) {
             if (mode === 1) return point.speed * 3.6;
@@ -1982,22 +2022,10 @@
             for (const file of files) {
                 try {
                     const text = await file.text();
-                    const trackData = parseGPXData(text, file.name);
-                    if (trackData) {
-                        trackData.thumbnail = null;
-                        loadedFiles.push(trackData);
-                        scheduleTrackThumbnail(trackData);
-                    }
+                    importTrackData(parseGPXData(text, file.name));
                 } catch (err) { console.error("解析失败", err); }
             }
-            const activeId = activeFileIndex >= 0 ? loadedFiles[activeFileIndex]?.id : null;
-            sortLoadedFiles();
-            if (activeId != null) {
-                const idx = loadedFiles.findIndex(f => f.id === activeId);
-                if (idx >= 0) activeFileIndex = idx;
-            }
-            renderFileList();
-            if (activeFileIndex === -1 && loadedFiles.length > 0) switchToFile(0);
+            finalizeFileImport();
             evt.target.value = '';
         }
 
@@ -2445,7 +2473,7 @@
                 <div class="file-item-body">
                     <div class="file-info">
                         <div class="file-name">${file.name}</div>
-                        <div class="file-meta">${(file.totalDistance / 1000).toFixed(2)} km | ${file.points.length} 点</div>
+                        <div class="file-meta">${file.isSample ? '样例 · ' : ''}${(file.totalDistance / 1000).toFixed(2)} km | ${file.points.length} 点</div>
                     </div>
                 </div>
                 <div class="btn-delete" onclick="removeFile(event, ${index})">×</div>
