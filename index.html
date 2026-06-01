@@ -12,11 +12,14 @@
             --primary-bg: rgba(255, 255, 255, 0.42);
             --accent-color: #007AFF;
             --danger-color: #FF3B30;
-            --panel-width: 300px;           /* 侧边文件列表面板宽度（需容纳缩略图 + 完整文件名） */
+            --panel-width: 300px;
+            /* 侧边文件列表面板宽度（需容纳缩略图 + 完整文件名） */
             --control-btn-size: 48px;
             --control-panel-height: calc(var(--control-btn-size) + 16px);
-            --chart-height: 150px;            /* 进度条上方速度/海拔曲线图高度 */
-            --chart-gap: 12px;                /* 曲线图与底部控制栏之间的间距 */
+            --chart-height: 150px;
+            /* 进度条上方速度/海拔曲线图高度 */
+            --chart-gap: 12px;
+            /* 曲线图与底部控制栏之间的间距 */
         }
 
         body,
@@ -142,8 +145,13 @@
         }
 
         @keyframes thumb-shimmer {
-            0% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
+            0% {
+                background-position: 100% 50%;
+            }
+
+            100% {
+                background-position: 0% 50%;
+            }
         }
 
         .file-item-body {
@@ -382,6 +390,8 @@
             pointer-events: auto;
             width: 100%;
             max-width: 500px;
+            container-type: inline-size;
+            container-name: controls;
         }
 
         .controls-main {
@@ -520,6 +530,47 @@
             align-items: center;
             gap: 8px;
             pointer-events: auto;
+        }
+
+        .controls-bottom-row {
+            flex-wrap: wrap;
+            align-items: stretch;
+        }
+
+        .controls-play-row {
+            flex: 1 1 auto;
+            min-width: 0;
+            padding: 6px 10px;
+        }
+
+        .controls-map-actions {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+            align-items: center;
+        }
+
+        /* 控件区宽度不够时：地图/模式/复位另起一行 */
+        @container controls (max-width: 480px) {
+            .controls-play-row {
+                flex: 1 1 100%;
+            }
+
+            .controls-map-actions {
+                flex: 1 1 100%;
+                justify-content: flex-end;
+            }
+        }
+
+        @media (max-width: 520px) {
+            .controls-play-row {
+                flex: 1 1 100%;
+            }
+
+            .controls-map-actions {
+                flex: 1 1 100%;
+                justify-content: flex-end;
+            }
         }
 
         .panel-glass {
@@ -1130,44 +1181,44 @@
                     <input type="range" id="progress-slider" min="0" max="1000" value="0" disabled>
                 </div>
                 <div class="controls-row controls-bottom-row">
-            <div class="panel-glass" style="flex-grow: 1; padding: 6px 10px;">
-                <button class="btn-side track-play-btn" id="track-play" style="width:36px; height:36px; background:rgba(0,0,0,0.05); color:#007AFF; box-shadow:none;" title="播放轨迹" disabled>
-                    <svg class="track-play-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                        <polygon points="8,5 19,12 8,19"></polygon>
-                    </svg>
-                </button>
-                <button class="btn-side" id="step-minus" style="width:36px; height:36px; background:rgba(0,0,0,0.05); color:#007AFF; box-shadow:none;">−</button>
-                <div class="segmented-control">
-                    <button class="segment-btn" data-val="1">1m</button>
-                    <button class="segment-btn" data-val="10">10m</button>
-                    <button class="segment-btn active" data-val="100">100m</button>
-                    <button class="segment-btn" data-val="1000">1k</button>
-                    <button class="segment-btn" data-val="10000">10k</button>
-                </div>
-                <button class="btn-side" id="step-plus" style="width:36px; height:36px; background:rgba(0,0,0,0.05); color:#007AFF; box-shadow:none;">+</button>
-            </div>
+                    <div class="panel-glass controls-play-row">
+                        <button class="btn-side track-play-btn" id="track-play" style="width:36px; height:36px; background:rgba(0,0,0,0.05); color:#007AFF; box-shadow:none;" title="播放轨迹" disabled>
+                            <svg class="track-play-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                                <polygon points="8,5 19,12 8,19"></polygon>
+                            </svg>
+                        </button>
+                        <button class="btn-side" id="step-minus" style="width:36px; height:36px; background:rgba(0,0,0,0.05); color:#007AFF; box-shadow:none;">−</button>
+                        <div class="segmented-control">
+                            <button class="segment-btn" data-val="1">1m</button>
+                            <button class="segment-btn" data-val="10">10m</button>
+                            <button class="segment-btn active" data-val="100">100m</button>
+                            <button class="segment-btn" data-val="1000">1k</button>
+                            <button class="segment-btn" data-val="10000">10k</button>
+                        </div>
+                        <button class="btn-side" id="step-plus" style="width:36px; height:36px; background:rgba(0,0,0,0.05); color:#007AFF; box-shadow:none;">+</button>
+                    </div>
 
-            <div style="display: flex; gap: 8px;">
-                <button id="map-layer-toggle" class="btn-side" title="切换地图">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;">
-                        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-                        <polyline points="2 17 12 22 22 17"></polyline>
-                        <polyline points="2 12 12 17 22 12"></polyline>
-                    </svg>
-                </button>
-                <button id="mode-toggle" class="btn-side" title="切换渲染模式">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;">
-                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-                    </svg>
-                </button>
-                <button id="reset-view" class="btn-side" title="复位地图">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;">
-                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-                        <path d="M3 3v5h5"></path>
-                    </svg>
-                </button>
-            </div>
-            </div>
+                    <div class="controls-map-actions">
+                        <button id="map-layer-toggle" class="btn-side" title="切换地图">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;">
+                                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                                <polyline points="2 17 12 22 22 17"></polyline>
+                                <polyline points="2 12 12 17 22 12"></polyline>
+                            </svg>
+                        </button>
+                        <button id="mode-toggle" class="btn-side" title="切换渲染模式">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                            </svg>
+                        </button>
+                        <button id="reset-view" class="btn-side" title="复位地图">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;">
+                                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                                <path d="M3 3v5h5"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
