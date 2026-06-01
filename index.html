@@ -3257,6 +3257,24 @@
             }, 280);
         }
 
+        function isIOSDevice() {
+            return /iPad|iPhone|iPod/.test(navigator.userAgent)
+                || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        }
+
+        function buildSystemMapUrl(lat, lon, label) {
+            const lat6 = lat.toFixed(6);
+            const lon6 = lon.toFixed(6);
+            const q = encodeURIComponent(label || '目的地');
+            if (isIOSDevice()) {
+                return `maps://?ll=${lat6},${lon6}&q=${q}`;
+            }
+            if (/Android/i.test(navigator.userAgent)) {
+                return `geo:${lat6},${lon6}?q=${lat6},${lon6}(${q})`;
+            }
+            return `https://maps.apple.com/?ll=${lat6},${lon6}&q=${q}`;
+        }
+
         function navAction(type) {
             const { lat, lon } = getNavCoords(navCoordSys);
             const lat6 = lat.toFixed(6);
@@ -3285,7 +3303,7 @@
                     url = `https://www.google.com/maps/search/?api=1&query=${lat6},${lon6}`;
                     break;
                 case 'system':
-                    url = `geo:${lat6},${lon6}?q=${lat6},${lon6}(目的地)`;
+                    url = buildSystemMapUrl(lat, lon, '目的地');
                     break;
             }
 
