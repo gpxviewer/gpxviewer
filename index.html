@@ -2324,6 +2324,11 @@
             renderTrackChart();
         }
 
+        function elevationHeatColor(ele, minEle, maxEle) {
+            const ratio = (ele - minEle) / (maxEle - minEle || 1);
+            return `hsl(${(1 - ratio) * 120}, 100%, 45%)`;
+        }
+
         function renderTrack() {
             polylines.forEach(p => map.removeLayer(p));
             polylines = [];
@@ -2715,6 +2720,11 @@
                     hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
                 })
                 : '--';
+            const eleMin = file.stats.minEle;
+            const eleMax = file.stats.maxEle;
+            const eleColor = Number.isFinite(eleMin) && Number.isFinite(eleMax)
+                ? elevationHeatColor(cur.ele, eleMin, eleMax)
+                : 'inherit';
             overlay.innerHTML = `
             <div style="font-weight:800; color:#007AFF; margin-bottom:8px; border-bottom:1px solid rgba(0,0,0,0.08); padding-bottom:4px; overflow:hidden; text-overflow:ellipsis;">${file.name}</div>
             <div class="info-grid">
@@ -2725,7 +2735,7 @@
                 </span>
                 <span class="info-label">当前海拔:</span>
                 <span class="info-stat-link" onclick="openStatsModal('elevation')" title="查看各海拔行驶里程分布">
-                    <b>${cur.ele.toFixed(1)} <small>m</small></b>${STAT_CHART_ICON_SVG}
+                    <b style="color:${eleColor}">${cur.ele.toFixed(1)} <small>m</small></b>${STAT_CHART_ICON_SVG}
                 </span>
                 <span class="info-label">累计距离:</span><b>${(targetDist / 1000).toFixed(2)} <small>km</small></b>
                 <span class="info-label">经纬度:</span>
