@@ -1199,6 +1199,21 @@
                     </div>
 
                     <div class="controls-map-actions">
+                        <button id="map-zoom-out" class="btn-side" type="button" title="缩小地图">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;" aria-hidden="true">
+                                <circle cx="10" cy="10" r="6.5"></circle>
+                                <line x1="15" y1="15" x2="21" y2="21"></line>
+                                <line x1="7" y1="10" x2="13" y2="10"></line>
+                            </svg>
+                        </button>
+                        <button id="map-zoom-in" class="btn-side" type="button" title="放大地图">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;" aria-hidden="true">
+                                <circle cx="10" cy="10" r="6.5"></circle>
+                                <line x1="15" y1="15" x2="21" y2="21"></line>
+                                <line x1="7" y1="10" x2="13" y2="10"></line>
+                                <line x1="10" y1="7" x2="10" y2="13"></line>
+                            </svg>
+                        </button>
                         <button id="map-layer-toggle" class="btn-side" title="切换地图">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;">
                                 <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
@@ -1554,6 +1569,8 @@
             document.getElementById('file-input').addEventListener('change', handleFileSelect);
             document.getElementById('mode-toggle').addEventListener('click', toggleMode);
             document.getElementById('map-layer-toggle').addEventListener('click', openMapSheet);
+            document.getElementById('map-zoom-in').addEventListener('click', () => zoomMapBy(1));
+            document.getElementById('map-zoom-out').addEventListener('click', () => zoomMapBy(-1));
             document.getElementById('reset-view').addEventListener('click', handleMapViewButtonClick);
             document.getElementById('panel-overlay').addEventListener('click', () => togglePanel(false));
 
@@ -3197,6 +3214,12 @@
             if (mapProgrammaticMove) return;
             exitMapCenterLock();
             invalidateMapViewBtnSequence();
+        }
+
+        function zoomMapBy(delta) {
+            if (!map) return;
+            if (delta > 0) map.zoomIn();
+            else map.zoomOut();
         }
 
         function invalidateMapViewBtnSequence() {
