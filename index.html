@@ -133,7 +133,8 @@
             font-size: 28px;
             line-height: 1;
             cursor: pointer;
-            color: #999;
+            color: #1c1c1e;
+            font-weight: 700;
             border: none;
             background: none;
             padding: 0 2px;
@@ -268,6 +269,7 @@
             display: none;
             opacity: 0;
             transition: opacity 0.3s;
+            pointer-events: none;
         }
 
         /* 重点：漫画对话框标记样式 */
@@ -1636,7 +1638,6 @@
             document.getElementById('map-zoom-in').addEventListener('click', () => zoomMapBy(1));
             document.getElementById('map-zoom-out').addEventListener('click', () => zoomMapBy(-1));
             document.getElementById('reset-view').addEventListener('click', handleMapViewButtonClick);
-            document.getElementById('panel-overlay').addEventListener('click', () => togglePanel(false));
 
             map.on('dragstart', onMapUserViewInterrupt);
             map.on('zoomstart', onMapUserViewInterrupt);
