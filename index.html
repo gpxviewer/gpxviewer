@@ -29,6 +29,8 @@
             height: 100%;
             width: 100%;
             overflow: hidden;
+            touch-action: manipulation;
+            -webkit-text-size-adjust: 100%;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background: #f0f0f2;
         }
@@ -37,6 +39,7 @@
             width: 100%;
             height: 100%;
             z-index: 1;
+            touch-action: none;
         }
 
         /* 菜单切换按钮 */
@@ -89,6 +92,52 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 8px;
+        }
+
+        .panel-header-title {
+            min-width: 0;
+        }
+
+        .panel-header-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .panel-icon-btn {
+            width: 36px;
+            height: 36px;
+            border: none;
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.06);
+            color: #555;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .panel-icon-btn:active {
+            background: rgba(0, 0, 0, 0.12);
+        }
+
+        .panel-icon-btn.sort-desc .sort-arrow {
+            transform: scaleY(-1);
+            transform-origin: center;
+        }
+
+        .panel-close-btn {
+            font-size: 28px;
+            line-height: 1;
+            cursor: pointer;
+            color: #999;
+            border: none;
+            background: none;
+            padding: 0 2px;
+            -webkit-tap-highlight-color: transparent;
         }
 
         #file-list {
@@ -1101,8 +1150,21 @@
 
     <div id="file-panel">
         <div class="panel-header">
-            <span>轨迹列表</span>
-            <span onclick="togglePanel(false)" style="font-size: 28px; cursor: pointer; color: #999;">×</span>
+            <div class="panel-header-left">
+                <span class="panel-header-title">轨迹列表</span>
+                <button type="button" id="file-list-sort" class="panel-icon-btn" title="按首记录点时间：早→晚（点击切换）" onclick="toggleFileListSort()">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="4" y1="7" x2="14" y2="7"></line>
+                        <line x1="4" y1="12" x2="11" y2="12"></line>
+                        <line x1="4" y1="17" x2="8" y2="17"></line>
+                        <g class="sort-arrow">
+                            <line x1="18" y1="8" x2="18" y2="16"></line>
+                            <polyline points="15 11 18 8 21 11"></polyline>
+                        </g>
+                    </svg>
+                </button>
+            </div>
+            <button type="button" class="panel-close-btn" onclick="togglePanel(false)" aria-label="关闭">×</button>
         </div>
 
         <div id="file-list">
@@ -1245,7 +1307,7 @@
         let activeFileIndex = -1;
         let polylines = [], statsMarkers = [], stopMarkers = [], milestoneMarkers = [];
         let pinnedStopMarker = null;
-        let currentMode = 0;
+        let currentMode = 2;
         let indicatorMarker;
         let prevIndicatorMarker = null;
         let currentDistanceValue = 0;
@@ -1267,8 +1329,9 @@
         let statsHistTooltipPinned = false;
         let navLat = 0, navLon = 0;
         let navCoordSys = 'gcj02'; // 导航坐标系默认：'wgs84' | 'gcj02' | 'bd09'
-        let currentMapProvider = 'osm'; // 默认底图，可选值见 MAP_PROVIDERS
+        let currentMapProvider = 'amap'; // 默认底图，可选值见 MAP_PROVIDERS
         let baseTileLayer = null;
+        let fileListSortAsc = true;
 
         const MAP_PROVIDERS = [
             {
@@ -1567,6 +1630,7 @@
             updateMapViewButtonUI();
 
             document.getElementById('file-input').addEventListener('change', handleFileSelect);
+            updateFileListSortButtonUI();
             document.getElementById('mode-toggle').addEventListener('click', toggleMode);
             document.getElementById('map-layer-toggle').addEventListener('click', openMapSheet);
             document.getElementById('map-zoom-in').addEventListener('click', () => zoomMapBy(1));
@@ -1578,10 +1642,17 @@
             map.on('zoomstart', onMapUserViewInterrupt);
 
             map.on('click', (e) => {
-                closeAllStopTooltips();
+                if (pinnedStopMarker) {
+                    closeAllStopTooltips();
+                    return;
+                }
                 if (activeFileIndex === -1) return;
                 findNearestTrackPoint(e.latlng);
             });
+
+            document.addEventListener('dblclick', (e) => {
+                e.preventDefault();
+            }, { passive: false });
 
             map.on('zoomend moveend', () => {
                 if (mapProgrammaticMove) mapProgrammaticMove = false;
@@ -1918,6 +1989,12 @@
                     }
                 } catch (err) { console.error("解析失败", err); }
             }
+            const activeId = activeFileIndex >= 0 ? loadedFiles[activeFileIndex]?.id : null;
+            sortLoadedFiles();
+            if (activeId != null) {
+                const idx = loadedFiles.findIndex(f => f.id === activeId);
+                if (idx >= 0) activeFileIndex = idx;
+            }
             renderFileList();
             if (activeFileIndex === -1 && loadedFiles.length > 0) switchToFile(0);
             evt.target.value = '';
@@ -2196,7 +2273,51 @@
             sanitizeElevations(points);
             recomputeEleStats(points, stats);
             const stops = detectStopPoints(points);
-            return { id: Date.now() + Math.random(), name: fileName, points, cumulativeDistances, totalDistance: totalDist, stats, stops, thumbnail: null };
+            return {
+                id: Date.now() + Math.random(),
+                name: fileName,
+                points,
+                cumulativeDistances,
+                totalDistance: totalDist,
+                stats,
+                stops,
+                thumbnail: null,
+                firstTime: raw[0]?.time || 0
+            };
+        }
+
+        function getTrackFirstTime(file) {
+            return file.firstTime ?? file.points[0]?.time ?? 0;
+        }
+
+        function sortLoadedFiles() {
+            loadedFiles.sort((a, b) => {
+                const ta = getTrackFirstTime(a);
+                const tb = getTrackFirstTime(b);
+                if (ta !== tb) return fileListSortAsc ? ta - tb : tb - ta;
+                return a.name.localeCompare(b.name, 'zh-CN');
+            });
+        }
+
+        function updateFileListSortButtonUI() {
+            const btn = document.getElementById('file-list-sort');
+            if (!btn) return;
+            btn.title = fileListSortAsc
+                ? '按首记录点时间：早→晚（点击切换）'
+                : '按首记录点时间：晚→早（点击切换）';
+            btn.classList.toggle('sort-desc', !fileListSortAsc);
+        }
+
+        function toggleFileListSort() {
+            fileListSortAsc = !fileListSortAsc;
+            const activeId = activeFileIndex >= 0 ? loadedFiles[activeFileIndex]?.id : null;
+            sortLoadedFiles();
+            if (activeId != null) {
+                const idx = loadedFiles.findIndex(f => f.id === activeId);
+                if (idx >= 0) activeFileIndex = idx;
+            }
+            updateFileListSortButtonUI();
+            renderFileList();
         }
 
         function sampleTrackIndices(count, maxSamples) {
